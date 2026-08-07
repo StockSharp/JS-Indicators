@@ -1,4 +1,4 @@
-import type { Time } from '../core/chart-api.js';
+import type { Time } from './types.js';
 import type {
     IIndicatorProcessor,
     IndicatorDefinition,

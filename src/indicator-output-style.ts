@@ -1,4 +1,4 @@
-import type { LineStyleValue } from '../core/chart-api.js';
+import type { LineStyleValue } from './types.js';
 
 /** Effective editor-facing appearance of one semantic indicator output. */
 export interface IndicatorOutputAppearance {

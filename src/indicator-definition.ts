@@ -1,4 +1,4 @@
-import type { CandlestickData, Time } from '../core/chart-api.js';
+import type { CandlestickData, Time } from './types.js';
 
 export interface IndicatorCandle extends CandlestickData {
     readonly volume?: number;

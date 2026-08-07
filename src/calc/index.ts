@@ -14,7 +14,7 @@ import CATALOG from '../catalog.json';
 import {
     getIndicatorDefinition,
     indicatorCategoryLabel,
-} from '../../../indicators/index.js';
+} from '../index.js';
 
 import { calcSMA } from './sma.js';
 import { calcEMA } from './ema.js';

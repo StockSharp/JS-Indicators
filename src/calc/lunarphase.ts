@@ -1,4 +1,4 @@
-import { lunarPhaseFromMilliseconds } from '../../../indicators/math/lunar-phase.js';
+import { lunarPhaseFromMilliseconds } from '../math/lunar-phase.js';
 import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
 
 // Lunar Phase indicator (Algo.Indicators/LunarPhase.cs).
