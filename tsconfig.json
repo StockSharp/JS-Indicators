@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // No "DOM". This package computes numbers and must stay usable in a worker, in node
+    // and on a server -- leaving the DOM out of `lib` makes that a compiler guarantee
+    // rather than a promise in the README.
+    "lib": ["ES2022"],
+    "strict": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"]
+}
