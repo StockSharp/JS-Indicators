@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcTwiggsMoneyFlow } = require('../../src/chart/indicators/calc/twiggsmoneyflow.js');
+const { calcTwiggsMoneyFlow } = require('../../src/calc/twiggsmoneyflow.js');
 
 function mk(h, l, c, v, i) {
     return { time: `t${i}`, open: (h+l)/2, high: h, low: l, close: c, volume: v };

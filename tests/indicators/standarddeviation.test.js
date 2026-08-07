@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcStandardDeviation } = require('../../src/chart/indicators/calc/standarddeviation.js');
+const { calcStandardDeviation } = require('../../src/calc/standarddeviation.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

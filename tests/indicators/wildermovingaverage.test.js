@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWilderMovingAverage } = require('../../src/chart/indicators/calc/wildermovingaverage.js');
+const { calcWilderMovingAverage } = require('../../src/calc/wildermovingaverage.js');
 
 function mk(closes) {
     return closes.map((c, i) => ({

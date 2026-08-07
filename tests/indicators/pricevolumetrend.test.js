@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPriceVolumeTrend } = require('../../src/chart/indicators/calc/pricevolumetrend.js');
+const { calcPriceVolumeTrend } = require('../../src/calc/pricevolumetrend.js');
 
 describe('calcPriceVolumeTrend', () => {
     it('empty candles → empty', () => {

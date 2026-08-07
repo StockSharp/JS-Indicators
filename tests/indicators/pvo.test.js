@@ -6,7 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPVO } = require('../../src/chart/indicators/calc/pvo.js');
+const { calcPVO } = require('../../src/calc/pvo.js');
 
 function mkV(volume, i) {
     return { time: `t${i}`, open: 1, high: 1, low: 1, close: 1, volume };

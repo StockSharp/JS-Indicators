@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMedianPrice } = require('../../src/chart/indicators/calc/medianprice.js');
+const { calcMedianPrice } = require('../../src/calc/medianprice.js');
 
 function makeCandles(rows) {
     return rows.map((r, i) => ({

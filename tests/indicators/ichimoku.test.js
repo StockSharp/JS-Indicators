@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcIchimoku } = require('../../src/chart/indicators/calc/ichimoku.js');
+const { calcIchimoku } = require('../../src/calc/ichimoku.js');
 
 function makeCandles(hl) {
     // The calc takes rolling max(high)/min(low) (mirrors StockSharp's

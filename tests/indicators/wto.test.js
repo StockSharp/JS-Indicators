@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWaveTrend } = require('../../src/chart/indicators/calc/wto.js');
+const { calcWaveTrend } = require('../../src/calc/wto.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

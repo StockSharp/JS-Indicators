@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDisparityIndex } = require('../../src/chart/indicators/calc/disparityindex.js');
+const { calcDisparityIndex } = require('../../src/calc/disparityindex.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

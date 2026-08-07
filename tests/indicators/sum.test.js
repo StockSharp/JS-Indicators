@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcSum } = require('../../src/chart/indicators/calc/sum.js');
+const { calcSum } = require('../../src/calc/sum.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

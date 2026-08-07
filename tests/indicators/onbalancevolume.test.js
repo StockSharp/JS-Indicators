@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcOnBalanceVolume } = require('../../src/chart/indicators/calc/onbalancevolume.js');
+const { calcOnBalanceVolume } = require('../../src/calc/onbalancevolume.js');
 
 describe('calcOnBalanceVolume', () => {
     it('empty candles → empty', () => {

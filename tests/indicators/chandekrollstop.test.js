@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcChandeKrollStop } = require('../../src/chart/indicators/calc/chandekrollstop.js');
+const { calcChandeKrollStop } = require('../../src/calc/chandekrollstop.js');
 
 function makeCandles(rows) {
     // rows: [high, low]

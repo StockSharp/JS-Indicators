@@ -3,8 +3,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcAroonOscillator } = require('../../src/chart/indicators/calc/aroonoscillator.js');
-const { calcAroon } = require('../../src/chart/indicators/calc/aroon.js');
+const { calcAroonOscillator } = require('../../src/calc/aroonoscillator.js');
+const { calcAroon } = require('../../src/calc/aroon.js');
 
 function makeCandles(hl) {
     return hl.map(([h, l], i) => ({

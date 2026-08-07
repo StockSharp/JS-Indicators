@@ -6,7 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcSchaffTrendCycle } = require('../../src/chart/indicators/calc/schafftrendcycle.js');
+const { calcSchaffTrendCycle } = require('../../src/calc/schafftrendcycle.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

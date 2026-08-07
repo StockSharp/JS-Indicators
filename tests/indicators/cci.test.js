@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcCCI } = require('../../src/chart/indicators/calc/cci.js');
+const { calcCCI } = require('../../src/calc/cci.js');
 
 function makeCandles(rows) {
     // rows: [high, low, close]

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWeightedClosePrice } = require('../../src/chart/indicators/calc/weightedcloseprice.js');
+const { calcWeightedClosePrice } = require('../../src/calc/weightedcloseprice.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

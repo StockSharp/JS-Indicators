@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcTrough } = require('../../src/chart/indicators/calc/trough.js');
+const { calcTrough } = require('../../src/calc/trough.js');
 
 function makeCandlesByLow(lows) {
     return lows.map((l, i) => ({

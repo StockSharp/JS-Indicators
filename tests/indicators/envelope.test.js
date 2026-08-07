@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcEnvelope } = require('../../src/chart/indicators/calc/envelope.js');
+const { calcEnvelope } = require('../../src/calc/envelope.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

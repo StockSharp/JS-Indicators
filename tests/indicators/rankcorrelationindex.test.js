@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcRankCorrelationIndex } = require('../../src/chart/indicators/calc/rankcorrelationindex.js');
+const { calcRankCorrelationIndex } = require('../../src/calc/rankcorrelationindex.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

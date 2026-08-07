@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcEndpointMovingAverage } = require('../../src/chart/indicators/calc/endpointma.js');
+const { calcEndpointMovingAverage } = require('../../src/calc/endpointma.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

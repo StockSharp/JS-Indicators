@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDSP } = require('../../src/chart/indicators/calc/dsp.js');
+const { calcDSP } = require('../../src/calc/dsp.js');
 
 function makeCandles(hl) {
     return hl.map((p, i) => ({

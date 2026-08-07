@@ -6,8 +6,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDX } = require('../../src/chart/indicators/calc/dx.js');
-const { calcADX } = require('../../src/chart/indicators/calc/adx.js');
+const { calcDX } = require('../../src/calc/dx.js');
+const { calcADX } = require('../../src/calc/adx.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

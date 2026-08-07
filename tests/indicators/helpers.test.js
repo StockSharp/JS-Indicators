@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { simpleMA, wilderMA, smoothedMA, wilderWMA } = require('../../src/chart/indicators/calc/helpers.js');
+const { simpleMA, wilderMA, smoothedMA, wilderWMA } = require('../../src/calc/helpers.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPriceChannels } = require('../../src/chart/indicators/calc/pricechannels.js');
+const { calcPriceChannels } = require('../../src/calc/pricechannels.js');
 
 function mk(h, l, i) {
     return { time: `t${i}`, open: (h+l)/2, high: h, low: l, close: (h+l)/2, volume: 1 };

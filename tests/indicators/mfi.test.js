@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMoneyFlowIndex } = require('../../src/chart/indicators/calc/mfi.js');
+const { calcMoneyFlowIndex } = require('../../src/calc/mfi.js');
 
 function mkCandle(i, h, l, c, v) {
     return {

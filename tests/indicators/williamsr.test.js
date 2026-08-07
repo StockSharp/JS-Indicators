@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWilliamsR } = require('../../src/chart/indicators/calc/williamsr.js');
+const { calcWilliamsR } = require('../../src/calc/williamsr.js');
 
 function makeCandles(rows) {
     // rows: [high, low, close]

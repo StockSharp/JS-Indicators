@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWilliamsAD } = require('../../src/chart/indicators/calc/williamsad.js');
+const { calcWilliamsAD } = require('../../src/calc/williamsad.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

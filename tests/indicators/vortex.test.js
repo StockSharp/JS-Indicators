@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVortex } = require('../../src/chart/indicators/calc/vortex.js');
+const { calcVortex } = require('../../src/calc/vortex.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

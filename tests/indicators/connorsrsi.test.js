@@ -13,7 +13,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcConnorsRSI } = require('../../src/chart/indicators/calc/connorsrsi.js');
+const { calcConnorsRSI } = require('../../src/calc/connorsrsi.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

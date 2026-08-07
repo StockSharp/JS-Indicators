@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcOscillatorOfMovingAverage } = require('../../src/chart/indicators/calc/osma.js');
+const { calcOscillatorOfMovingAverage } = require('../../src/calc/osma.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

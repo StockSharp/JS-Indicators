@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDeMarker } = require('../../src/chart/indicators/calc/demarker.js');
+const { calcDeMarker } = require('../../src/calc/demarker.js');
 
 function makeCandles(hl) {
     return hl.map((p, i) => ({

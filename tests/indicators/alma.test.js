@@ -9,7 +9,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcALMA } = require('../../src/chart/indicators/calc/alma.js');
+const { calcALMA } = require('../../src/calc/alma.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

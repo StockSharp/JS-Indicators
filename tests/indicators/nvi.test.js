@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcNVI } = require('../../src/chart/indicators/calc/nvi.js');
+const { calcNVI } = require('../../src/calc/nvi.js');
 
 describe('calcNVI', () => {
     it('empty candles → empty', () => {

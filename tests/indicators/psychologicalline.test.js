@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPsychologicalLine } = require('../../src/chart/indicators/calc/psychologicalline.js');
+const { calcPsychologicalLine } = require('../../src/calc/psychologicalline.js');
 
 function mk(close, i) {
     return { time: `t${i}`, open: close, high: close, low: close, close, volume: 1 };

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcRelativeMomentumIndex } = require('../../src/chart/indicators/calc/relativemomentumindex.js');
+const { calcRelativeMomentumIndex } = require('../../src/calc/relativemomentumindex.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

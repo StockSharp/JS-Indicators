@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcKVO } = require('../../src/chart/indicators/calc/kvo.js');
+const { calcKVO } = require('../../src/calc/kvo.js');
 
 function makeCandlesHLCV(rows) {
     return rows.map((r, i) => ({

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcRelativeVigorIndex } = require('../../src/chart/indicators/calc/relativevigorindex.js');
+const { calcRelativeVigorIndex } = require('../../src/calc/relativevigorindex.js');
 
 function makeOHLC(rows) {
     return rows.map((r, i) => ({

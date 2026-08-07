@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPositiveVolumeIndex } = require('../../src/chart/indicators/calc/positivevolumeindex.js');
+const { calcPositiveVolumeIndex } = require('../../src/calc/positivevolumeindex.js');
 
 describe('calcPositiveVolumeIndex', () => {
     it('empty candles → empty', () => {

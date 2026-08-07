@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcStochasticK } = require('../../src/chart/indicators/calc/stochastick.js');
+const { calcStochasticK } = require('../../src/calc/stochastick.js');
 
 function makeOHLC(rows) {
     return rows.map((r, i) => ({

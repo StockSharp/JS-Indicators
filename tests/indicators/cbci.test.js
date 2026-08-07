@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcConstanceBrownCompositeIndex } = require('../../src/chart/indicators/calc/cbci.js');
+const { calcConstanceBrownCompositeIndex } = require('../../src/calc/cbci.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

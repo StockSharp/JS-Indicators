@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcRainbowCharts } = require('../../src/chart/indicators/calc/rainbowcharts.js');
+const { calcRainbowCharts } = require('../../src/calc/rainbowcharts.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

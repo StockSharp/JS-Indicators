@@ -4,7 +4,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calcMeanDeviation } =
-    require('../../src/chart/indicators/calc/meandeviation.js');
+    require('../../src/calc/meandeviation.js');
 
 function approxEq(actual, expected, eps = 1e-12) {
     assert.ok(

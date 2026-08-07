@@ -4,7 +4,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calcMovingAverageCrossover } =
-    require('../../src/chart/indicators/calc/macross.js');
+    require('../../src/calc/macross.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

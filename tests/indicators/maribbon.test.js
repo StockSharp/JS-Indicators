@@ -4,7 +4,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calcMovingAverageRibbon } =
-    require('../../src/chart/indicators/calc/maribbon.js');
+    require('../../src/calc/maribbon.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

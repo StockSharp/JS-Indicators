@@ -8,7 +8,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcAdaptiveLaguerreFilter } = require('../../src/chart/indicators/calc/alf.js');
+const { calcAdaptiveLaguerreFilter } = require('../../src/calc/alf.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

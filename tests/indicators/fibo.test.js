@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcFibonacciRetracement, FIBO_LEVELS, FIBO_KEYS } = require('../../src/chart/indicators/calc/fibo.js');
+const { calcFibonacciRetracement, FIBO_LEVELS, FIBO_KEYS } = require('../../src/calc/fibo.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

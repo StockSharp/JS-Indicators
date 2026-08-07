@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcChoppinessIndex } = require('../../src/chart/indicators/calc/chop.js');
+const { calcChoppinessIndex } = require('../../src/calc/chop.js');
 
 function makeCandles(rows) {
     // rows: [high, low, close]  (open defaults to close)

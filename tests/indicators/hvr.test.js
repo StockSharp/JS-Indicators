@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcHistoricalVolatilityRatio } = require('../../src/chart/indicators/calc/hvr.js');
+const { calcHistoricalVolatilityRatio } = require('../../src/calc/hvr.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

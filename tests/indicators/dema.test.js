@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDEMA } = require('../../src/chart/indicators/calc/dema.js');
+const { calcDEMA } = require('../../src/calc/dema.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

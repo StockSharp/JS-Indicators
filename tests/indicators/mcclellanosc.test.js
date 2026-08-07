@@ -4,8 +4,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calcMcClellanOscillator } =
-    require('../../src/chart/indicators/calc/mcclellanosc.js');
-const { calcEMA } = require('../../src/chart/indicators/calc/ema.js');
+    require('../../src/calc/mcclellanosc.js');
+const { calcEMA } = require('../../src/calc/ema.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

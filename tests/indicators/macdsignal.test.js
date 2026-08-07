@@ -4,8 +4,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calcMovingAverageConvergenceDivergenceSignal } =
-    require('../../src/chart/indicators/calc/macdsignal.js');
-const { calcMACD } = require('../../src/chart/indicators/calc/macd.js');
+    require('../../src/calc/macdsignal.js');
+const { calcMACD } = require('../../src/calc/macd.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

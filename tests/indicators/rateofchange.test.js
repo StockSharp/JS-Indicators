@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcRateOfChange } = require('../../src/chart/indicators/calc/rateofchange.js');
+const { calcRateOfChange } = require('../../src/calc/rateofchange.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

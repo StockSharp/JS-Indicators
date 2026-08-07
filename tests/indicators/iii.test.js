@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcIntradayIntensityIndex } = require('../../src/chart/indicators/calc/iii.js');
+const { calcIntradayIntensityIndex } = require('../../src/calc/iii.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

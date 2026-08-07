@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const mod = require('../../src/chart/indicators/calc/lunarphase.js');
+const mod = require('../../src/calc/lunarphase.js');
 const { calcLunarPhase, _lunarPhaseFromMs } = mod;
 
 function makeCandlesAtTimes(times) {

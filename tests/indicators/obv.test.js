@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcOBV } = require('../../src/chart/indicators/calc/obv.js');
+const { calcOBV } = require('../../src/calc/obv.js');
 
 describe('calcOBV', () => {
     it('empty candles → empty', () => {

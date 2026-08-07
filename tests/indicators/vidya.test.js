@@ -6,7 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVidya } = require('../../src/chart/indicators/calc/vidya.js');
+const { calcVidya } = require('../../src/calc/vidya.js');
 
 function mk(closes) {
     return closes.map((c, i) => ({

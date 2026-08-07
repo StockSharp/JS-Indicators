@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPrettyGoodOscillator } = require('../../src/chart/indicators/calc/pgo.js');
+const { calcPrettyGoodOscillator } = require('../../src/calc/pgo.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

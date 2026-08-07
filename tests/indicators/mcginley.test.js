@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMcGinleyDynamic } = require('../../src/chart/indicators/calc/mcginley.js');
+const { calcMcGinleyDynamic } = require('../../src/calc/mcginley.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

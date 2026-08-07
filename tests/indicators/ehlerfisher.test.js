@@ -7,7 +7,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcEhlerFisher } = require('../../src/chart/indicators/calc/ehlerfisher.js');
+const { calcEhlerFisher } = require('../../src/calc/ehlerfisher.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

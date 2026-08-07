@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVolumeProfile } = require('../../src/chart/indicators/calc/volumeprofile.js');
+const { calcVolumeProfile } = require('../../src/calc/volumeprofile.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

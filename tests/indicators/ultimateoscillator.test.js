@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcUltimateOscillator } = require('../../src/chart/indicators/calc/ultimateoscillator.js');
+const { calcUltimateOscillator } = require('../../src/calc/ultimateoscillator.js');
 
 function mk(h, l, c, i) {
     return { time: `t${i}`, open: (h+l)/2, high: h, low: l, close: c, volume: 1 };

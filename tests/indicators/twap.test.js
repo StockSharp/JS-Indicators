@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcTWAP } = require('../../src/chart/indicators/calc/twap.js');
+const { calcTWAP } = require('../../src/calc/twap.js');
 
 function mk(h, l, c, i) {
     return { time: `t${i}`, open: (h+l)/2, high: h, low: l, close: c, volume: 1 };

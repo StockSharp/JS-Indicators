@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWMA } = require('../../src/chart/indicators/calc/wma.js');
+const { calcWMA } = require('../../src/calc/wma.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcTrueStrengthIndex } = require('../../src/chart/indicators/calc/truestrengthindex.js');
+const { calcTrueStrengthIndex } = require('../../src/calc/truestrengthindex.js');
 
 function mk(close, i) {
     return { time: `t${i}`, open: close, high: close, low: close, close, volume: 1 };

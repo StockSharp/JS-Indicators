@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVWAP } = require('../../src/chart/indicators/calc/vwap.js');
+const { calcVWAP } = require('../../src/calc/vwap.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

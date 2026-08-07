@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcQStick } = require('../../src/chart/indicators/calc/qstick.js');
+const { calcQStick } = require('../../src/calc/qstick.js');
 
 function makeCandles(rows) {
     // rows: array of {o,c}

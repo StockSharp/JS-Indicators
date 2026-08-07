@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcSineWave } = require('../../src/chart/indicators/calc/sinewave.js');
+const { calcSineWave } = require('../../src/calc/sinewave.js');
 
 function makeCandles(n) {
     const arr = [];

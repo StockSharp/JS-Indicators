@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcAlligator } = require('../../src/chart/indicators/calc/alligator.js');
+const { calcAlligator } = require('../../src/calc/alligator.js');
 
 function makeCandles(hl) {
     return hl.map(([h, l], i) => ({

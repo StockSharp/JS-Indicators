@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcStandardError } = require('../../src/chart/indicators/calc/standarderror.js');
+const { calcStandardError } = require('../../src/calc/standarderror.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

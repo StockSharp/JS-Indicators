@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcFRAMA } = require('../../src/chart/indicators/calc/frama.js');
+const { calcFRAMA } = require('../../src/calc/frama.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

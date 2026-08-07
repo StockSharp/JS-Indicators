@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcWoodiesCCI } = require('../../src/chart/indicators/calc/woodiescci.js');
+const { calcWoodiesCCI } = require('../../src/calc/woodiescci.js');
 
 function mk(rows) {
     return rows.map((r, i) => ({

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcBollingerPercentB } = require('../../src/chart/indicators/calc/bbpercentb.js');
+const { calcBollingerPercentB } = require('../../src/calc/bbpercentb.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

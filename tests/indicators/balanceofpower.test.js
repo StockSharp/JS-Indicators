@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcBalanceOfPower } = require('../../src/chart/indicators/calc/balanceofpower.js');
+const { calcBalanceOfPower } = require('../../src/calc/balanceofpower.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

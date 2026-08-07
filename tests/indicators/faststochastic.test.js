@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcFastStochastic } = require('../../src/chart/indicators/calc/faststochastic.js');
+const { calcFastStochastic } = require('../../src/calc/faststochastic.js');
 
 function makeCandles(hlc) {
     return hlc.map((row, i) => ({

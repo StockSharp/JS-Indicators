@@ -4,8 +4,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcAcceleration } = require('../../src/chart/indicators/calc/acceleration.js');
-const { calcAwesomeOscillator } = require('../../src/chart/indicators/calc/awesomeoscillator.js');
+const { calcAcceleration } = require('../../src/calc/acceleration.js');
+const { calcAwesomeOscillator } = require('../../src/calc/awesomeoscillator.js');
 
 function makeCandles(hl) {
     return hl.map(([h, l], i) => ({

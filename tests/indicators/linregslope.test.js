@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcLinearRegSlope } = require('../../src/chart/indicators/calc/linregslope.js');
+const { calcLinearRegSlope } = require('../../src/calc/linregslope.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

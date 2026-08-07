@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPPO } = require('../../src/chart/indicators/calc/ppo.js');
+const { calcPPO } = require('../../src/calc/ppo.js');
 
 function mk(close, i) {
     return { time: `t${i}`, open: close, high: close, low: close, close, volume: 1 };

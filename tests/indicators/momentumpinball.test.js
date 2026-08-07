@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMomentumPinball } = require('../../src/chart/indicators/calc/momentumpinball.js');
+const { calcMomentumPinball } = require('../../src/calc/momentumpinball.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

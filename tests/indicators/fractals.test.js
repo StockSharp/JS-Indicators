@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcFractals } = require('../../src/chart/indicators/calc/fractals.js');
+const { calcFractals } = require('../../src/calc/fractals.js');
 
 function makeCandles(rows) {
     // rows: [high, low]

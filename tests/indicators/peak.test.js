@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPeak } = require('../../src/chart/indicators/calc/peak.js');
+const { calcPeak } = require('../../src/calc/peak.js');
 
 function makeCandles(highs) {
     return highs.map((h, i) => ({

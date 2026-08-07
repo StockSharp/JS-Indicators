@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcBalanceOfMarketPower } = require('../../src/chart/indicators/calc/bomp.js');
+const { calcBalanceOfMarketPower } = require('../../src/calc/bomp.js');
 
 function makeCandles(rows) {
     // rows: [open, high, low, close, volume]

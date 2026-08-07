@@ -7,7 +7,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVMA } = require('../../src/chart/indicators/calc/vma.js');
+const { calcVMA } = require('../../src/calc/vma.js');
 
 function mk(closes) {
     return closes.map((c, i) => ({

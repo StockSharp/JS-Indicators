@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDonchian } = require('../../src/chart/indicators/calc/donchian.js');
+const { calcDonchian } = require('../../src/calc/donchian.js');
 
 function makeCandles(hl) {
     // hl = [[high, low], ...]

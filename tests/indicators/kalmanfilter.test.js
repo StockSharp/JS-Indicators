@@ -8,7 +8,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcKalmanFilter } = require('../../src/chart/indicators/calc/kalmanfilter.js');
+const { calcKalmanFilter } = require('../../src/calc/kalmanfilter.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

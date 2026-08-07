@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMassIndex } = require('../../src/chart/indicators/calc/massindex.js');
+const { calcMassIndex } = require('../../src/calc/massindex.js');
 
 function makeCandlesHL(rangesAround) {
     // Build candles with deterministic high/low so range = highs[i]-lows[i].

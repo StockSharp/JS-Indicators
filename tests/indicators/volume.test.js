@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVolume } = require('../../src/chart/indicators/calc/volume.js');
+const { calcVolume } = require('../../src/calc/volume.js');
 
 describe('calcVolume', () => {
     it('empty candle array → empty result', () => {

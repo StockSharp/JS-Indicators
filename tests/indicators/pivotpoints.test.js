@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPivotPoints } = require('../../src/chart/indicators/calc/pivotpoints.js');
+const { calcPivotPoints } = require('../../src/calc/pivotpoints.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

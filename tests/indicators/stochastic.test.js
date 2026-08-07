@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcStochastic } = require('../../src/chart/indicators/calc/stochastic.js');
+const { calcStochastic } = require('../../src/calc/stochastic.js');
 
 function makeCandles(hlc) {
     return hlc.map((row, i) => ({

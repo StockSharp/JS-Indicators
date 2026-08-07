@@ -6,7 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcRSI } = require('../../src/chart/indicators/calc/rsi.js');
+const { calcRSI } = require('../../src/calc/rsi.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

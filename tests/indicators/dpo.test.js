@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDPO } = require('../../src/chart/indicators/calc/dpo.js');
+const { calcDPO } = require('../../src/calc/dpo.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

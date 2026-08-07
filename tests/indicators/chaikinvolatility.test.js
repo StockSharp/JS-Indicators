@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcChaikinVolatility } = require('../../src/chart/indicators/calc/chaikinvolatility.js');
+const { calcChaikinVolatility } = require('../../src/calc/chaikinvolatility.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

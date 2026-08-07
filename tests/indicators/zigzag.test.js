@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcZigZag } = require('../../src/chart/indicators/calc/zigzag.js');
+const { calcZigZag } = require('../../src/calc/zigzag.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

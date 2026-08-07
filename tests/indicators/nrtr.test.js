@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcNickRypockTrailingReverse } = require('../../src/chart/indicators/calc/nrtr.js');
+const { calcNickRypockTrailingReverse } = require('../../src/calc/nrtr.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

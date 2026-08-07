@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcTypicalPrice } = require('../../src/chart/indicators/calc/typicalprice.js');
+const { calcTypicalPrice } = require('../../src/calc/typicalprice.js');
 
 describe('calcTypicalPrice', () => {
     it('empty candles → empty', () => {

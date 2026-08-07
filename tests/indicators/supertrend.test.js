@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcSuperTrend } = require('../../src/chart/indicators/calc/supertrend.js');
+const { calcSuperTrend } = require('../../src/calc/supertrend.js');
 
 function makeOHLC(rows) {
     return rows.map((r, i) => ({

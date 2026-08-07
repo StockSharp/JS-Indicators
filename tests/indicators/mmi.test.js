@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMarketMeannessIndex } = require('../../src/chart/indicators/calc/mmi.js');
+const { calcMarketMeannessIndex } = require('../../src/calc/mmi.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

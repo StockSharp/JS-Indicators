@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcShift } = require('../../src/chart/indicators/calc/shift.js');
+const { calcShift } = require('../../src/calc/shift.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

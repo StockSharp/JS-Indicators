@@ -14,7 +14,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcLowest } = require('../../src/chart/indicators/calc/lowest.js');
+const { calcLowest } = require('../../src/calc/lowest.js');
 
 // low is deliberately close - 1 (and high close + 2) so a min taken over the
 // wrong column produces different numbers and cannot pass by accident.

@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcBollingerBands } = require('../../src/chart/indicators/calc/bb.js');
+const { calcBollingerBands } = require('../../src/calc/bb.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

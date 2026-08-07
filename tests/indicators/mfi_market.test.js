@@ -4,7 +4,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { calcMarketFacilitationIndex } =
-    require('../../src/chart/indicators/calc/mfi_market.js');
+    require('../../src/calc/mfi_market.js');
 
 function approxEq(actual, expected, eps = 1e-12) {
     assert.ok(

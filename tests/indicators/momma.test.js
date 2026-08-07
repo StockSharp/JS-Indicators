@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcMomentumOfMovingAverage } = require('../../src/chart/indicators/calc/momma.js');
+const { calcMomentumOfMovingAverage } = require('../../src/calc/momma.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

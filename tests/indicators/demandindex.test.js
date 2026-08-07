@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcDemandIndex } = require('../../src/chart/indicators/calc/demandindex.js');
+const { calcDemandIndex } = require('../../src/calc/demandindex.js');
 
 function makeCandles(cv) {
     // cv = [[close, volume], ...]

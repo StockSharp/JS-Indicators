@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcZLEMA } = require('../../src/chart/indicators/calc/zlema.js');
+const { calcZLEMA } = require('../../src/calc/zlema.js');
 
 function mk(closes) {
     return closes.map((c, i) => ({

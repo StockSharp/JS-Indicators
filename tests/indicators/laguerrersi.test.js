@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcLaguerreRSI } = require('../../src/chart/indicators/calc/laguerrersi.js');
+const { calcLaguerreRSI } = require('../../src/calc/laguerrersi.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

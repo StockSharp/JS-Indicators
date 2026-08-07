@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcPassThrough } = require('../../src/chart/indicators/calc/passthrough.js');
+const { calcPassThrough } = require('../../src/calc/passthrough.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

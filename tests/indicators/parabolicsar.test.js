@@ -7,7 +7,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcParabolicSAR } = require('../../src/chart/indicators/calc/parabolicsar.js');
+const { calcParabolicSAR } = require('../../src/calc/parabolicsar.js');
 
 function makeCandles(hl) {
     return hl.map(([h, l], i) => ({

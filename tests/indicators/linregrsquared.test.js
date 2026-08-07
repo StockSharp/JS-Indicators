@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcLinearRegRSquared } = require('../../src/chart/indicators/calc/linregrsquared.js');
+const { calcLinearRegRSquared } = require('../../src/calc/linregrsquared.js');
 
 function mk(close, i) {
     return { time: `t${i}`, open: close, high: close, low: close, close, volume: 1 };

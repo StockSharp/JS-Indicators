@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcATR } = require('../../src/chart/indicators/calc/atr.js');
+const { calcATR } = require('../../src/calc/atr.js');
 
 function makeCandles(rows) {
     // rows: [high, low, close]

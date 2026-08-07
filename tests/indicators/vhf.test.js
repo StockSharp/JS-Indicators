@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcVHF } = require('../../src/chart/indicators/calc/vhf.js');
+const { calcVHF } = require('../../src/calc/vhf.js');
 
 function mk(closes, highs, lows) {
     return closes.map((c, i) => ({

@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcFractalDimension } = require('../../src/chart/indicators/calc/fractaldimension.js');
+const { calcFractalDimension } = require('../../src/calc/fractaldimension.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

@@ -19,7 +19,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcHighest } = require('../../src/chart/indicators/calc/highest.js');
+const { calcHighest } = require('../../src/calc/highest.js');
 
 // high is deliberately close + 0.5 (and low close - 0.5) so that a max taken
 // over the wrong column produces different numbers and cannot pass by accident.

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcAroon } = require('../../src/chart/indicators/calc/aroon.js');
+const { calcAroon } = require('../../src/calc/aroon.js');
 
 function makeCandles(hl) {
     return hl.map(([h, l], i) => ({

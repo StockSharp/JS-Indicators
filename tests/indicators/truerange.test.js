@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcTrueRange } = require('../../src/chart/indicators/calc/truerange.js');
+const { calcTrueRange } = require('../../src/calc/truerange.js');
 
 describe('calcTrueRange', () => {
     it('empty candles → empty', () => {

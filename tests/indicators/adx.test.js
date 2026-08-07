@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcADX } = require('../../src/chart/indicators/calc/adx.js');
+const { calcADX } = require('../../src/calc/adx.js');
 
 function makeCandles(hlc) {
     return hlc.map((row, i) => ({

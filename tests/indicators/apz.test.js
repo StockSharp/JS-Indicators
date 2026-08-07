@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcAdaptivePriceZone } = require('../../src/chart/indicators/calc/apz.js');
+const { calcAdaptivePriceZone } = require('../../src/calc/apz.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcApprovalFlowIndex } = require('../../src/chart/indicators/calc/approvalflowindex.js');
+const { calcApprovalFlowIndex } = require('../../src/calc/approvalflowindex.js');
 
 function makeCandles(rows) {
     // rows: [close, volume]

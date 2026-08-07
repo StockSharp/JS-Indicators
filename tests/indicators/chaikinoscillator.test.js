@@ -3,8 +3,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcChaikinOscillator } = require('../../src/chart/indicators/calc/chaikinoscillator.js');
-const { calcADL } = require('../../src/chart/indicators/calc/adl.js');
+const { calcChaikinOscillator } = require('../../src/calc/chaikinoscillator.js');
+const { calcADL } = require('../../src/calc/adl.js');
 
 function approxEq(actual, expected, eps = 1e-9) {
     assert.ok(

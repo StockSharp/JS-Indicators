@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcKAMA } = require('../../src/chart/indicators/calc/kama.js');
+const { calcKAMA } = require('../../src/calc/kama.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({

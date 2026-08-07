@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calcCompositeMomentum } = require('../../src/chart/indicators/calc/compositemomentum.js');
+const { calcCompositeMomentum } = require('../../src/calc/compositemomentum.js');
 
 function makeCandles(closes) {
     return closes.map((c, i) => ({
