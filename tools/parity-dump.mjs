@@ -97,6 +97,7 @@ if (existsSync(statusFile)) {
         if (prev.available && prev.stamp === stamp) {
             JSON.parse(readFileSync(join(cacheDir, 'catalog.json'), 'utf8'));
             JSON.parse(readFileSync(join(cacheDir, 'values.json'), 'utf8'));
+            JSON.parse(readFileSync(join(cacheDir, 'stress.json'), 'utf8'));
             console.log('[parity-dump] reusing cached dump (dumper unchanged since last run)');
             process.exit(0);
         }
@@ -129,6 +130,7 @@ function dump(args, outFile) {
 
 dump([], 'catalog.json');
 dump(['--values'], 'values.json');
+dump(['--stress'], 'stress.json');
 
 writeStatus({ available: true, stamp });
 console.log('[parity-dump] dump ready in .parity-cache');
