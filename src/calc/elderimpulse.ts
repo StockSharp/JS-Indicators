@@ -89,12 +89,22 @@ export function calcElderImpulse(candles: CandlePoint[], params?: IndicatorParam
         const macdPrev = macdLine[i - 1];
         if (ema === null || emaPrev === null || macd === null || macdPrev === null) continue;
 
+        // Both comparisons need a dead band, and it has to be scaled by the price rather than by
+        // the quantity being compared. On a constant-slope run the EMAs sit exactly on their
+        // steady state, so the true step is zero -- but accumulating it in doubles leaves a
+        // residual of about 1e-14 whose sign is set by rounding, and a bare `>` turns that into a
+        // green or red bar on a market that did not accelerate. The platform computes the same
+        // chain in decimal, where the step really is zero, and calls the bar blue.
+        const tol = 1e-10 * Math.max(1, Math.abs(ema));
+        const rising = (a: number, b: number) => a - b > tol;
+        const falling = (a: number, b: number) => b - a > tol;
+
         let v;
         let state;
-        if (ema > emaPrev && macd > macdPrev) {
+        if (rising(ema, emaPrev) && rising(macd, macdPrev)) {
             v = 1;
             state = 'green';
-        } else if (ema < emaPrev && macd < macdPrev) {
+        } else if (falling(ema, emaPrev) && falling(macd, macdPrev)) {
             v = -1;
             state = 'red';
         } else {

@@ -1,5 +1,5 @@
-// Williams %R indicator: warm-up nulls, hand-computed values, flat-window
-// fallback.
+// Williams %R indicator: warm-up nulls, hand-computed values, and the flat window the
+// platform declines to answer for.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -67,12 +67,14 @@ describe('calcWilliamsR', () => {
         approxEq(bot[2].value, -100);
     });
 
-    it('flat window (high==low across whole window) → -100 fallback', () => {
+    it('flat window (high==low across whole window) has no value', () => {
         const out = calcWilliamsR(
             makeCandles([[5, 5, 5], [5, 5, 5], [5, 5, 5]]),
             { length: 3 },
         );
-        assert.strictEqual(out[2].value, -100);
+        // Where the range is zero the close has no position within it. StockSharp returns no
+        // value here; -100 would claim the bar closed at the bottom of a range that has no bottom.
+        assert.strictEqual(out[2].value, null);
     });
 
     it('time field passed through unchanged', () => {

@@ -56,16 +56,27 @@ export function calcRSI(candles: CandlePoint[], params?: IndicatorParams): Indic
     // Per-candle output: SMMA call #k corresponds to candle[k] (1-indexed),
     // so the result of avgG[k-1] / avgL[k-1] is placed at out[k]. Out[0]
     // remains null (no delta for the first candle).
+    let prev: number | null = null;
     for (let k = 0; k < n - 1; k++) {
-        // Not formed until the gain/loss SMMA has buffered `length` values (its
-        // (k+1)-th call happens on candle[k+1]); StockSharp reports null/IsFormed=false
-        // for the whole warm-up, so emit nothing before out[length].
-        if (k < length - 1) continue;
         const g = avgG[k];
         const l = avgL[k];
         if (g === null || l === null) continue;
+
         const sum = g + l;
-        const rsi = sum === 0 ? 50 : 100 * g / sum;
+        let rsi: number;
+        if (sum === 0) {
+            // No movement either way: the platform repeats its last reading, and only calls it
+            // 50 when there has not been one yet.
+            rsi = prev === null ? 50 : prev;
+        } else {
+            rsi = 100 * g / sum;
+            prev = rsi;
+        }
+
+        // Warm-up is computed but not emitted -- the running state above has to advance through
+        // it, because the platform has no formed-guard on the calculation either; it is the
+        // dumper that blanks the unformed bars.
+        if (k < length - 1) continue;
         out[k + 1] = { time: candles[k + 1].time, value: rsi };
     }
     return out;

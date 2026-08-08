@@ -102,14 +102,12 @@ export function calcFRAMA(candles: CandlePoint[], params?: IndicatorParams): Ind
         const n2 = (mx2 - mn2) / period;
         const n3 = (mx3 - mn3) / period;
 
-        // log(0) = -Infinity; (-Inf - x) / log2 = -Inf, clamped to 1, alpha=1.
-        // That makes frama track the new close fully on flat slices — same
-        // as the .cs's `.Min(2).Max(1)` behaviour on -Inf.
+        // Both infinities are meaningful and the clamp below already resolves them the way the
+        // platform's `.Min(2).Max(1)` does -- collapsing them to d=1 first is what diverged.
+        //   n3 == 0 (flat third slice)  -> +Infinity -> 2 -> full smoothing
+        //   n1 + n2 == 0                -> -Infinity -> 1 -> tracks the close
         let d = (Math.log(n1 + n2) - Math.log(n3)) / log2;
-        if (!Number.isFinite(d)) {
-            // NaN: 0/0 or Inf-Inf. Treat as fully-trend (d=1, alpha=1).
-            d = 1;
-        }
+        if (Number.isNaN(d)) d = 1;   // both slices flat; the C# alpha is NaN and throws on the cast
         if (d > 2) d = 2;
         else if (d < 1) d = 1;
 

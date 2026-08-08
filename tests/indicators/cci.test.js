@@ -1,4 +1,5 @@
-// CCI indicator: warm-up nulls, hand-computed reference, flat-window fallback.
+// CCI indicator: warm-up nulls, hand-computed reference, and the flat window the platform
+// declines to answer for.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -71,14 +72,16 @@ describe('calcCCI', () => {
         approxEq(out[4].value, 20, 1e-7);
     });
 
-    it('flat typical-price window → CCI=0 (zero-meanDeviation fallback)', () => {
+    it('flat typical-price window has no value', () => {
         const out = calcCCI(
             makeCandles([[5, 5, 5], [5, 5, 5], [5, 5, 5]]),
             { length: 3 },
         );
         assert.strictEqual(out[0].value, null);
         assert.strictEqual(out[1].value, null);
-        assert.strictEqual(out[2].value, 0);
+        // Mean deviation is zero, so CCI is 0/0. StockSharp emits nothing rather than calling it
+        // zero -- a motionless market is not a market sitting exactly on its average.
+        assert.strictEqual(out[2].value, null);
     });
 
     it('time field passed through unchanged', () => {

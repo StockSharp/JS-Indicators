@@ -33,7 +33,17 @@ const TOL = 1e-6;
 
 const MATRIX_DIVERGENCES = {};
 
-const STRESS_DIVERGENCES = {};
+const STRESS_DIVERGENCES = {
+    // Not a port defect, and not fixable by porting harder: the zone collapses and both sides then
+    // read their own rounding noise. After the spike the RSI settles on a constant, so the 14-sample
+    // min/max window has zero width and every threshold lands on the RSI itself. What each side
+    // answers is then decided by whether its last bit puts the current sample at the top or the
+    // bottom of a band that has no width -- decimal noise on the platform (~1e-27), double noise
+    // here (~1e-14). Both produce an arbitrary walk of 0 / 50 / 100 on a market that is standing
+    // still. A dead band would make this port self-consistent but still would not reproduce the
+    // platform's coin flips, so there is nothing to match.
+    'DynamicZonesRSI@spike': 'degenerate zone (max === min) where both sides classify their own rounding noise',
+};
 
 // Indicators the platform runs but this port has no calc for. Same exact-set rule as the other
 // parity file: a new StockSharp indicator lands here as a FAILURE, not as a line in a log.

@@ -120,14 +120,16 @@ export function calcDX(
         const sp = smPlus[i];
         const sm = smMinus[i];
         const st = smTR[i];
-        if (i < firstFormed || sp === null || sm === null || st === null || st === 0) {
+        if (i < firstFormed || sp === null || sm === null || st === null) {
             plusDI[i] = { time: t, value: null };
             minusDI[i] = { time: t, value: null };
             dx[i] = { time: t, value: null };
             continue;
         }
-        const pdi = 100 * sp / st;
-        const mdi = 100 * sm / st;
+        // A zero smoothed range means the market did not move, not that the indicator has nothing
+        // to say: the platform reports no directional strength (0) and stays formed.
+        const pdi = st === 0 ? 0 : 100 * sp / st;
+        const mdi = st === 0 ? 0 : 100 * sm / st;
         const sum = pdi + mdi;
         const dxv = sum === 0 ? 0 : 100 * Math.abs(pdi - mdi) / sum;
         plusDI[i] = { time: t, value: pdi };

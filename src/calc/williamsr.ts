@@ -1,10 +1,9 @@
 // Williams %R (Larry Williams) — momentum oscillator scaled to -100..0.
 //   %R[i] = -100 * (highestHigh(N) - close[i]) / (highestHigh(N) - lowestLow(N))
 // where N == `length` and the window is the last N bars ending at i.
-// Null until index `length-1` (warm-up). When highestHigh == lowestLow over
-// the window (perfectly flat), the formula is undefined — we emit -100
-// (bottom of range) to mirror what StockSharp's WilliamsRange does and
-// keep the series numerically meaningful for charting.
+// Null until index `length-1` (warm-up). A perfectly flat window (highestHigh == lowestLow)
+// has no defined %R -- the position of the close within a zero-width range is not a number --
+// and StockSharp emits nothing there, so neither does this.
 
 import type { CandlePoint, IndicatorParams } from './types.js';
 
@@ -41,14 +40,7 @@ export function calcWilliamsR(candles: CandlePoint[], params?: IndicatorParams) 
             continue;
         }
         const range = hi - lo;
-        let v;
-        if (range === 0) {
-            // Flat window — formula undefined; emit bottom of range (-100).
-            v = -100;
-        } else {
-            v = -100 * (hi - close) / range;
-        }
-        out[i] = { time: candles[i].time, value: v };
+        out[i] = { time: candles[i].time, value: range === 0 ? null : -100 * (hi - close) / range };
     }
     return out;
 }

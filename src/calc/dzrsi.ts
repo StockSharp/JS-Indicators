@@ -58,7 +58,18 @@ function rsiSeries(closes: (number | null | undefined)[], length: number): (numb
     if (!seedOk) return out;
     let avgGain = gainSum / length;
     let avgLoss = lossSum / length;
-    out[length] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+    // Two different zero denominators hide behind `avgLoss === 0`, and they mean opposite things.
+    // Only gains -> 100. Neither gains nor losses (a window that did not move) -> the platform
+    // repeats its previous reading, and calls it 50 only when there is none yet. Reading both as
+    // 100 turns a flat stretch into a maximum, which then poisons the zone min/max buffers.
+    let prevRsi: number | null = null;
+    const map = (): number => {
+        if (avgGain + avgLoss === 0) return prevRsi === null ? 50 : prevRsi;
+        return prevRsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    };
+
+    out[length] = map();
     for (let i = length + 1; i < n; i++) {
         const a = closes[i - 1];
         const b = closes[i];
@@ -69,7 +80,7 @@ function rsiSeries(closes: (number | null | undefined)[], length: number): (numb
         const l = d < 0 ? -d : 0;
         avgGain = (avgGain * (length - 1) + g) / length;
         avgLoss = (avgLoss * (length - 1) + l) / length;
-        out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+        out[i] = map();
     }
     return out;
 }

@@ -1397,9 +1397,11 @@ export class ConstanceBrownCompositeIndexProcessor extends SequentialIndicatorPr
         const momentum = commit
             ? this.momentum.push(shortRsi)
             : this.momentum.preview(shortRsi);
+        // Past the combined gate the composite is published every bar, counting an inner that has
+        // no value as 0 -- the platform's `?? 0`. Suppressing the bar instead makes the whole line
+        // vanish on a market that only falls, where the RSI momentum never produces a value.
         const composite = input.index >= this.combinedBar
-            && roc !== null && momentum !== null
-            ? finite(roc + momentum)
+            ? finite((roc ?? 0) + (momentum ?? 0))
             : null;
         const fastSma = commit
             ? this.fastSma.push(composite)

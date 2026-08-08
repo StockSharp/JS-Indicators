@@ -47,14 +47,24 @@ export class CommodityChannelIndexKernel {
         if (window.length !== this.windowLength || window.some((value) => value === null))
             return null;
 
+        // A flat window has no defined CCI and the platform emits nothing for it. Flatness is
+        // decided on the prices, not on the computed deviation: summation rounding leaves a
+        // ~1e-14 residual, so `deviation === 0` would be false and the division would return
+        // that residual over itself -- ±1/0.015, a ±66.7 spike out of a motionless market.
         let sum = 0;
-        for (const value of window) sum += value!;
+        let flat = true;
+        for (const value of window) {
+            if (value !== incoming) flat = false;
+            sum += value!;
+        }
+        if (flat) return null;
+
         const average = sum / this.windowLength;
         let deviation = 0;
         for (const value of window) deviation += Math.abs(value! - average);
         deviation /= this.windowLength;
         return deviation === 0
-            ? 0
+            ? null
             : (incoming! - average) / (0.015 * deviation);
     }
 }

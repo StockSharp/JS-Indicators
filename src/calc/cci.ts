@@ -4,12 +4,12 @@
 // meanDev[i]   = (1/length) * Σ_{j=i-length+1..i} |typical[j] - smaTP[i]|
 // CCI[i]       = (typical[i] - smaTP[i]) / (0.015 * meanDev[i])
 //
-// Null until index `length-1`. When meanDeviation is exactly zero (flat
-// typical-price window) the formula divides by zero; we emit 0 — same
-// convention StockSharp's CCI uses, and it keeps the line continuous on
-// the chart instead of dropping out into nulls.
+// Null until index `length-1`. A flat typical-price window makes the mean deviation zero and
+// the formula undefined; StockSharp emits nothing there, so neither does this. Flatness is
+// tested on the prices themselves rather than on the computed deviation -- a rolling sum drifts
+// by ~1e-14, so `meanDev === 0` is false even on an exactly flat window, and the division then
+// returns the rounding residual divided by itself: +-1/0.015, i.e. +-66.7 out of nowhere.
 
-import { simpleMA } from './helpers.js';
 import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
 
 /**
@@ -43,37 +43,36 @@ export function calcCCI(candles: CandlePoint[], params?: IndicatorParams): Indic
         tp[i] = (h + l + cl) / 3;
     }
 
-    const smaTP = simpleMA(tp, length);
-
     for (let i = length - 1; i < n; i++) {
-        const mean = smaTP[i];
         const tpi = tp[i];
-        if (mean === null || tpi === null) {
+        if (tpi === null) {
             out[i] = { time: candles[i].time, value: null };
             continue;
         }
-        let devSum = 0;
+
+        // One pass over the window: it decides validity, flatness and the mean together. The mean
+        // is summed here rather than taken from a rolling accumulator so it is the exact arithmetic
+        // mean of these bars -- see the note above on why the drift matters.
+        let sum = 0;
         let bad = false;
+        let flat = true;
         for (let j = i - length + 1; j <= i; j++) {
             const v = tp[j];
             if (v === null) { bad = true; break; }
-            devSum += Math.abs(v - mean);
+            if (v !== tpi) flat = false;
+            sum += v;
         }
-        if (bad) {
+        if (bad || flat) {
             out[i] = { time: candles[i].time, value: null };
             continue;
         }
+
+        const mean = sum / length;
+        let devSum = 0;
+        for (let j = i - length + 1; j <= i; j++) devSum += Math.abs(tp[j] - mean);
+
         const meanDev = devSum / length;
-        let value;
-        if (meanDev === 0) {
-            // Flat window — formula divides by zero. Emit 0 (numerator
-            // is also 0 in any reasonable flat case) and let the chart
-            // keep the line continuous.
-            value = 0;
-        } else {
-            value = (tpi - mean) / (0.015 * meanDev);
-        }
-        out[i] = { time: candles[i].time, value };
+        out[i] = { time: candles[i].time, value: meanDev === 0 ? null : (tpi - mean) / (0.015 * meanDev) };
     }
     return out;
 }

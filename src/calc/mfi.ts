@@ -44,6 +44,8 @@ export function calcMoneyFlowIndex(candles: CandlePoint[], params?: IndicatorPar
     const negBuf: number[] = []; // sliding window of negFlow
     let posSum = 0;
     let negSum = 0;
+    let posNonZero = 0;
+    let negNonZero = 0;
 
     for (let i = 0; i < n; i++) {
         const c = candles[i];
@@ -57,7 +59,14 @@ export function calcMoneyFlowIndex(candles: CandlePoint[], params?: IndicatorPar
             // and emit null. This is a defensive choice — the .cs would NRE on
             // bad inputs but we don't want a single bad print to break the chart.
             posBuf.push(0); negBuf.push(0);
-            if (posBuf.length > length) { posSum -= posBuf.shift()!; negSum -= negBuf.shift()!; }
+            if (posBuf.length > length) {
+                const droppedPos = posBuf.shift()!;
+                const droppedNeg = negBuf.shift()!;
+                posSum -= droppedPos;
+                negSum -= droppedNeg;
+                if (droppedPos !== 0) posNonZero--;
+                if (droppedNeg !== 0) negNonZero--;
+            }
             out[i] = { time: c ? c.time : null, value: null };
             // Reset reference so next valid bar starts with the .cs-equivalent
             // "previous typical == this typical" check via stale 0.
@@ -73,10 +82,22 @@ export function calcMoneyFlowIndex(candles: CandlePoint[], params?: IndicatorPar
         negBuf.push(neg);
         posSum += pos;
         negSum += neg;
+        if (pos !== 0) posNonZero++;
+        if (neg !== 0) negNonZero++;
         if (posBuf.length > length) {
-            posSum -= posBuf.shift()!;
-            negSum -= negBuf.shift()!;
+            const droppedPos = posBuf.shift()!;
+            const droppedNeg = negBuf.shift()!;
+            posSum -= droppedPos;
+            negSum -= droppedNeg;
+            if (droppedPos !== 0) posNonZero--;
+            if (droppedNeg !== 0) negNonZero--;
         }
+
+        // Both flows are non-negative, so a window sums to zero exactly when it holds no non-zero
+        // entry. Counting them says that exactly; the rolling sums carry subtraction rounding and
+        // would answer "1e-13, not zero" for a window that is empty of flow.
+        if (posNonZero === 0) posSum = 0;
+        if (negNonZero === 0) negSum = 0;
 
         if (posBuf.length < length) {
             out[i] = { time: c.time, value: null };

@@ -149,10 +149,12 @@ export function calcConstanceBrownCompositeIndex(
     const compVals = new Array(n);
     for (let i = 0; i < n; i++) compVals[i] = NaN;
     for (let i = combinedBar; i < n; i++) {
+        // Once the combined gate opens the composite is published every bar. An inner that has no
+        // value counts as 0 rather than suppressing the bar -- that is the .cs `?? 0`, and it is
+        // what a market that only falls exercises: its RSI momentum never produces a value at all.
         const r = roc[i];
         const m = momentum[i];
-        if (r === null || m === null) continue;
-        compVals[i] = r + m;
+        compVals[i] = (r === null ? 0 : r) + (m === null ? 0 : m);
         composite[i] = { time: candles[i].time, value: compVals[i] };
     }
 

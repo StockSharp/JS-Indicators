@@ -59,7 +59,10 @@ export function calcDPO(candles: CandlePoint[], params?: IndicatorParams): Indic
         }
     }
 
-    const lookBack = ((length / 2) | 0) + 1;
+    // Clamped to Length-1 because the .cs buffer holds only Length values: asking it for one
+    // further back than that returns its oldest slot, not a longer lookback. The clamp only
+    // bites at Length 1-2, which is why the default of 3 agrees either way.
+    const lookBack = Math.min(((length / 2) | 0) + 1, length - 1);
     // .cs buffer has capacity = Length and only receives pushes once SMA
     // is formed. IsFormed when buffer.Count >= Length, which happens at
     // candle index `2*length - 2` (length-1 to first-push, then length

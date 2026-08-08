@@ -55,9 +55,10 @@ export function calcADX(candles: CandlePoint[], params?: IndicatorParams) {
         const sp = smPlus[i];
         const sm = smMinus[i];
         const st = smTR[i];
-        if (sp === null || sm === null || st === null || st === 0) continue;
-        const pdi = 100 * sp / st;
-        const mdi = 100 * sm / st;
+        if (sp === null || sm === null || st === null) continue;
+        // See calcDX: a zero smoothed range is a still market (DI = 0), not an unformed one.
+        const pdi = st === 0 ? 0 : 100 * sp / st;
+        const mdi = st === 0 ? 0 : 100 * sm / st;
         pdiRaw[i] = pdi;
         mdiRaw[i] = mdi;
         const sum = pdi + mdi;

@@ -47,15 +47,22 @@ export function calcBollingerPercentB(candles: CandlePoint[], params?: Indicator
         const price = closes[i];
         if (m === null || price === null) continue;
 
+        // A window of identical closes has zero variance, so the band collapses and %b is
+        // undefined -- the platform emits nothing. Decide that on the closes themselves: the
+        // deviation is measured against a mean that carries summation rounding, so at short
+        // lengths `width === 0` below can be false on a window that is in fact flat.
         let sumSq = 0;
         let bad = false;
+        let flat = true;
+        const first = closes[i - length + 1];
         for (let j = i - length + 1; j <= i; j++) {
             const v = closes[j];
             if (v === null) { bad = true; break; }
+            if (v !== first) flat = false;
             const d = v - m;
             sumSq += d * d;
         }
-        if (bad) continue;
+        if (bad || flat) continue;
         const sigma = Math.sqrt(sumSq / length);
         const upper = m + k * sigma;
         const lower = m - k * sigma;

@@ -1325,7 +1325,9 @@ export class WilliamsRProcessor extends SequentialIndicatorProcessor<
         let value: number | null = null;
         if (high !== null && low !== null && close !== null) {
             const range = high - low;
-            value = range === 0 ? -100 : -100 * (high - close) / range;
+            // A zero-width range has no defined %R; the platform emits nothing, and so must this
+            // or the incremental path would disagree with the batch one on flat data.
+            if (range !== 0) value = -100 * (high - close) / range;
         }
         return {
             isFormed: value !== null,

@@ -29,7 +29,7 @@ export function calcForecastOscillator(candles: CandlePoint[], params?: Indicato
     const out = new Array(n);
     for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
 
-    if (length <= 1 || n < length) return out;
+    if (length < 1 || n < length) return out;
 
     // Precompute closes for fast access; mark non-finite as NaN.
     const closes = new Array(n);

@@ -49,11 +49,15 @@ const K0 = 1 - K1;
 
 /**
  * @param {CandlePoint[]} candles
- * @param {object} [_params] No tunables — Length is hardcoded to 2 in .cs.
+ * @param {{length?: number}} [params] Window the filter has to fill before it reports.
  * @returns {IndicatorPoint[]}
  */
-export function calcOptimalTracking(candles: CandlePoint[], _params?: IndicatorParams) {
+export function calcOptimalTracking(candles: CandlePoint[], params?: IndicatorParams) {
     if (!Array.isArray(candles) || candles.length === 0) return [];
+
+    // 2 is the constructor default, not a fixed size: Length is the seed window the filter fills
+    // before it reports. Below 2 the filtered branch would read a midprice that was never pushed.
+    const length = Math.max(2, Math.trunc(params && Number.isFinite(params.length) ? params.length : 2));
 
     const n = candles.length;
     const out = new Array(n);
@@ -79,10 +83,9 @@ export function calcOptimalTracking(candles: CandlePoint[], _params?: IndicatorP
         const average = (h + l) / 2;
         const halfRange = (h - l) / 2;
 
-        // C# LengthIndicator IsFormed = Buffer.Count >= Length (=2); the .cs
-        // pushes BEFORE checking, so once we've already accumulated >= 1
-        // previous bar (this is the 2nd or later bar), the formed branch fires.
-        const isFormed = pushedCount >= 1;
+        // The .cs pushes the midprice and only then asks IsFormed, so count this bar first.
+        pushedCount++;
+        const isFormed = pushedCount >= length;
         let result;
 
         if (!isFormed) {
@@ -105,12 +108,10 @@ export function calcOptimalTracking(candles: CandlePoint[], _params?: IndicatorP
         }
 
         prevAverage = average;
-        pushedCount++;
-        if (pushedCount > 2) pushedCount = 2;
+        if (pushedCount > length) pushedCount = length;
 
-        // Not formed until Buffer.Count == Length (=2): StockSharp nulls the first
-        // bar, so emit only from the second valid bar onward.
-        out[i] = { time: c.time, value: pushedCount >= 2 ? result : null };
+        // One gate for both the warm-up nulls and the seed branch, so the two cannot disagree.
+        out[i] = { time: c.time, value: isFormed ? result : null };
     }
 
     return out;

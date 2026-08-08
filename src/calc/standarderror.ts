@@ -21,7 +21,7 @@ export function calcStandardError(candles: CandlePoint[], params?: IndicatorPara
     const out = new Array(n);
     for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
 
-    if (length <= 1) return out;
+    if (length < 1) return out;
 
     for (let i = length - 1; i < n; i++) {
         let sumX = 0;
@@ -43,7 +43,9 @@ export function calcStandardError(candles: CandlePoint[], params?: IndicatorPara
         const slope = divisor === 0 ? 0 : (length * sumXY - sumX * sumY) / divisor;
         const intercept = (sumY - slope * sumX) / length;
 
-        if (length === 2) {
+        // One or two points are fitted exactly, so the error is zero. Length 1 has to be named
+        // here as well: the general branch would evaluate sqrt(0 / -1), which is -0.
+        if (length <= 2) {
             out[i] = { time: candles[i].time, value: 0 };
             continue;
         }

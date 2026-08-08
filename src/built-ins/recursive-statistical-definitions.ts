@@ -160,12 +160,13 @@ class DirectionalMovementKernel {
             : this.trueRange.preview(trueRange);
         if (commit) this.previousCandle = current;
 
-        if (smoothedPlus === null || smoothedMinus === null
-            || smoothedRange === null || smoothedRange === 0) {
+        if (smoothedPlus === null || smoothedMinus === null || smoothedRange === null) {
             return { plusDI: null, minusDI: null, dx: null };
         }
-        const plusDI = 100 * smoothedPlus / smoothedRange;
-        const minusDI = 100 * smoothedMinus / smoothedRange;
+        // Same as the batch calc: a zero smoothed range reports no direction, it does not withhold
+        // a reading. Keeping the two in step is the point -- nothing else compares them on flat data.
+        const plusDI = smoothedRange === 0 ? 0 : 100 * smoothedPlus / smoothedRange;
+        const minusDI = smoothedRange === 0 ? 0 : 100 * smoothedMinus / smoothedRange;
         const sum = plusDI + minusDI;
         return {
             plusDI,

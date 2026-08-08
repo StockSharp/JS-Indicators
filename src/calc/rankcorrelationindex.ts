@@ -66,7 +66,7 @@ export function calcRankCorrelationIndex(candles: CandlePoint[], params?: Indica
     const out = new Array(n);
     for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
 
-    if (length <= 1 || n < length) return out;
+    if (length < 1 || n < length) return out;
 
     const periodRanks = new Array(length);
     for (let i = 0; i < length; i++) periodRanks[i] = i + 1;
