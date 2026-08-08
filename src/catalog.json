@@ -2705,7 +2705,14 @@
   "name": "Optimal Tracking",
   "group": "Trend",
   "pane": "overlay",
-  "params": [],
+  "params": [
+   {
+    "key": "length",
+    "default": 2,
+    "min": 2,
+    "max": 500
+   }
+  ],
   "outputs": [
    "line"
   ]

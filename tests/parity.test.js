@@ -84,7 +84,6 @@ const PARAM_COUNT_DELTAS = {
     // because the client's parameter set is the one its settings dialog needs.
     Trix: 'client exposes Length only; StockSharp also exposes the inner SMA length',
     KasePeakOscillator: 'client exposes both cycle lengths plus a smoothing length',
-    OptimalTracking: 'client takes no parameters; StockSharp exposes one',
     SchaffTrendCycle: 'client exposes the full MACD + stochastic parameter set',
     PercentagePriceOscillator: 'client exposes both MA lengths plus the signal length',
 };
