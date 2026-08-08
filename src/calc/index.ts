@@ -10,7 +10,7 @@
 
 // Generated indicator catalog (the picker's metadata). Regenerate, don't hand-edit entries; the
 // C# parity test validates it against the StockSharp catalog snapshot.
-import CATALOG from '../catalog.json';
+import CATALOG from '../catalog.json' with { type: 'json' };
 import {
     getIndicatorDefinition,
     indicatorCategoryLabel,
