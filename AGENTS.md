@@ -48,7 +48,9 @@ src/catalog.json      generated catalogue: kinds, aliases, parameters, ranges, p
 src/indicator-*.ts    definition/registry/runtime/source/taxonomy — the incremental machinery
 tests/indicators/     163 per-indicator specs, one file each
 tests/incremental-*   the incremental implementation checked against the batch one
-tests/parity*.test.js catalogue and value parity against the live C# dump
+tests/parity*.test.js catalogue and value parity against the live C# dump; parity-scan.test.js
+                      is the same comparison off the default operating point (see below)
+tests/types/          type-level tests -- they emit nothing, they fail the typecheck
 tools/                check-public-api.mjs, public-api-manifest.mjs, parity-dump.mjs,
                       csharp-catalog/ (.NET parity dumper)
 ```
@@ -91,6 +93,22 @@ Charts, and remember to unlink before trusting a green Charts run.
   failing build, a crashing dumper, non-JSON output, an unparsable cache — is a hard failure.
   Do not add a `catch` that turns a new failure mode into a skip; the suite spent a long time
   reporting itself green that way.
+- **One operating point proves almost nothing.** `numeric-parity` compares every indicator
+  against the platform bar-for-bar, and it passed for a long time while sixteen indicators were
+  wrong -- because it runs one smooth series at default parameters. `parity-scan.test.js` adds
+  the two axes that hid them: every indicator that owns a `Length` at 1, 2, 3, 6 and 21, and
+  every indicator over eight awkward candle shapes (constant, rising, falling, spike, gap,
+  alternating, zero volume, three bars). Add an indicator and it is covered automatically; add a
+  *parameter* that is not `Length` and it is not, so say so rather than assuming.
+- **A flat window is the case to check first.** Most of what the scan caught was one mistake in
+  different costumes: a window where every price is identical makes ranges and deviations zero,
+  and the platform emits no value there. Inventing one (0, -100, "bottom of the range") is wrong,
+  and so is testing for it with `=== 0` on a rolling sum -- accumulate and evict across a window
+  and you carry ~1e-14 of drift, so the guard misses and the division returns the residual over
+  itself. Decide flatness on the prices.
+- **Fix both implementations, always.** Every indicator exists twice, batch and incremental. The
+  `incremental-*` tests compare them to each other, so a one-sided fix fails there -- treat that
+  failure as the reminder it is, never as a reason to edit the expectation.
 - **Parity exemptions are exact allow-lists.** `NO_JS_CALC`, `NON_SCALAR`, `PANE_DELTAS` and
   `PARAM_COUNT_DELTAS` are asserted in both directions: an unlisted divergence fails, and so
   does a list entry that no longer applies. When you fix one, delete its entry.
