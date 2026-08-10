@@ -1,130 +1,206 @@
-// Vidya (Variable Index Dynamic Average, Chande) — 1:1 port of
-// D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\Vidya.cs.
-//
-// Why the previous "two-stage" port was wrong: the C# Vidya is a
-// DecimalLengthIndicator whose own Buffer grows once per IsFinal call
-// only *while* the not-yet-formed branch runs, but the not-yet-formed
-// branch itself only fires once the inner CMO becomes formed. CMO is
-// formed when its inner Sum's Buffer.Count >= Length (15 deltas). CMO
-// returns null on bar 0 (initialise) and feeds deltas on bars 1..15;
-// it forms on bar 15 (delta #15). So Vidya emits null for bars 0..14,
-// and from bar 15 onward enters the not-formed branch which:
-//   - PushBacks close[i] to its own Buffer (Buffer grows 1 per bar);
-//   - emits Buffer.Sum / Length — a partial-seed value because the
-//     denominator stays at Length while the numerator only contains
-//     the bars pushed so far.
-// At bar 15 that's close[15] / 15  ≈ 462.8 (close[15]≈6942 in the ohlcv).
-// At bar 29 the Buffer fills (15 closes) → SMA over close[15..29].
-// From bar 30 onward IsFormed is true and we run the variable-smoothing
-// recurrence with _prevFinalValue carried bar-to-bar.
-//
-// CMO formula (matches ChandeMomentumOscillator.cs):
-//   up sum = Σ(max(delta, 0))   over the last Length deltas
-//   dn sum = Σ(max(-delta, 0))  over the last Length deltas
-//   cmo = (up - dn) == 0 ? 0 : 100 * (up - dn) / (up + dn)
-// CMO becomes formed after Length deltas have been pushed.
-//
-// Vidya recurrence (IsFormed branch):
-//   curValue = (close[i] - _prevFinalValue) * multiplier * |cmo/100| + _prevFinalValue
-//   multiplier = 2 / (Length + 1)
-//
-// Default Length = 15 (from .cs ctor).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    RollingSum,
+    type RingBufferCheckpoint,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    AdaptiveLengthParameters,
+} from './shared/adaptive.js';
+import {
+    finite,
+    integer,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export interface VidyaCheckpoint {
+    readonly initialized: boolean;
+    readonly previousClose: number | null;
+    readonly up: RollingWindowCheckpoint;
+    readonly down: RollingWindowCheckpoint;
+    readonly seed: RingBufferCheckpoint<number>;
+    readonly previous: number;
+}
 
-/**
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcVidya(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 15;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export class VidyaProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    VidyaCheckpoint
+> {
+    private initialized = false;
+    private previousClose: number | null = null;
+    private readonly up: RollingSum;
+    private readonly down: RollingSum;
+    private readonly seed: RingBuffer<number>;
+    private seedSum = 0;
+    private previous = 0;
+    private readonly multiplier: number;
 
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    const multiplier = 2 / (length + 1);
-
-    // Inner CMO state (Sum<delta+>, Sum<delta->). Both have capacity=length.
-    let cmoInit = false;
-    let lastClose = 0;
-    /** @type {number[]} */
-    const upBuf: number[] = []; // delta>0 ? delta : 0
-    /** @type {number[]} */
-    const dnBuf: number[] = []; // delta<0 ? -delta : 0
-    let upSum = 0;
-    let dnSum = 0;
-
-    // Vidya's own Buffer + state.
-    /** @type {number[]} */
-    const buf: number[] = [];
-    let bufSum = 0;
-    let prevFinalValue = 0;
-    let isFormed = false;
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i] && candles[i].close;
-        if (typeof c !== 'number' || !Number.isFinite(c)) {
-            out[i] = { time: candles[i].time, value: null };
-            continue;
-        }
-
-        // CMO step.
-        let cmoValueValid = false;
-        let cmoValue = 0;
-        if (!cmoInit) {
-            // Bar 0 (or first valid bar): set _last and emit empty.
-            lastClose = c;
-            cmoInit = true;
-        } else {
-            const delta = c - lastClose;
-            const upDelta = delta > 0 ? delta : 0;
-            const dnDelta = delta > 0 ? 0 : -delta;
-            // PushBack into inner Sum buffers (capacity=length).
-            upBuf.push(upDelta);
-            upSum += upDelta;
-            if (upBuf.length > length) upSum -= upBuf.shift()!;
-            dnBuf.push(dnDelta);
-            dnSum += dnDelta;
-            if (dnBuf.length > length) dnSum -= dnBuf.shift()!;
-            lastClose = c;
-            // CMO IsFormed when Sum.Buffer.Count >= length.
-            if (upBuf.length >= length) {
-                const sumBoth = upSum + dnSum;
-                cmoValue = sumBoth === 0 ? 0 : 100 * (upSum - dnSum) / sumBoth;
-                cmoValueValid = true;
-            }
-        }
-
-        if (!cmoValueValid) {
-            out[i] = { time: candles[i].time, value: null };
-            continue;
-        }
-
-        // Vidya step.
-        if (!isFormed) {
-            buf.push(c);
-            bufSum += c;
-            if (buf.length > length) bufSum -= buf.shift()!;
-            prevFinalValue = bufSum / length;
-            // Not formed until the Buffer holds `length` closes; StockSharp reports
-            // the partial-seed bars as not-formed (null) and emits only the SMA seed.
-            if (buf.length >= length) {
-                isFormed = true;
-                out[i] = { time: candles[i].time, value: prevFinalValue };
-            }
-            continue;
-        }
-
-        // IsFormed branch: variable-smoothing recurrence.
-        const f = multiplier * Math.abs(cmoValue / 100);
-        const curValue = (c - prevFinalValue) * f + prevFinalValue;
-        prevFinalValue = curValue;
-        out[i] = { time: candles[i].time, value: curValue };
+    constructor(readonly length: number) {
+        super(['line']);
+        integer(length, length, 1, 500, 'length');
+        this.up = new RollingSum(length);
+        this.down = new RollingSum(length);
+        this.seed = new RingBuffer(length);
+        this.multiplier = 2 / (length + 1);
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        if (close === null) {
+            return {
+                isFormed: this.seed.full,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+        if (!this.initialized) {
+            if (commit) {
+                this.initialized = true;
+                this.previousClose = close;
+            }
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const delta = close - this.previousClose!;
+        const up = Math.max(delta, 0);
+        const down = Math.max(-delta, 0);
+        const upSum = commit ? this.up.push(up) : this.up.preview(up);
+        const downSum = commit ? this.down.push(down) : this.down.preview(down);
+        if (commit) this.previousClose = close;
+        if (upSum === null || downSum === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const total = upSum + downSum;
+        const cmo = total === 0 ? 0 : 100 * (upSum - downSum) / total;
+        if (!this.seed.full) {
+            const value = (this.seedSum + close) / this.length;
+            const formed = this.seed.size + 1 >= this.length;
+            if (commit) {
+                this.seed.push(close);
+                this.seedSum += close;
+                this.previous = value;
+            }
+            return {
+                isFormed: formed,
+                values: [this.output('line', formed ? value : null, input.index)],
+            };
+        }
+
+        const value = (close - this.previous)
+            * this.multiplier * Math.abs(cmo / 100) + this.previous;
+        if (commit) this.previous = value;
+        return {
+            isFormed: true,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.initialized = false;
+        this.previousClose = null;
+        this.up.reset();
+        this.down.reset();
+        this.seed.clear();
+        this.seedSum = 0;
+        this.previous = 0;
+    }
+
+    protected captureState(): VidyaCheckpoint {
+        return Object.freeze({
+            initialized: this.initialized,
+            previousClose: this.previousClose,
+            up: this.up.checkpoint(),
+            down: this.down.checkpoint(),
+            seed: this.seed.checkpoint(),
+            previous: this.previous,
+        });
+    }
+
+    protected restoreState(state: VidyaCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || typeof state.initialized !== 'boolean'
+            || (state.previousClose !== null && finite(state.previousClose) === null)
+            || finite(state.previous) === null
+            || !Array.isArray(state.up?.values) || !Array.isArray(state.down?.values)
+            || !Array.isArray(state.seed?.values)
+            || state.up.values.length !== state.down.values.length
+            || state.up.values.length > this.length
+            || state.seed.values.length > this.length
+            || state.up.values.some((value) => finite(value) === null || value < 0)
+            || state.down.values.some((value) => finite(value) === null || value < 0)
+            || state.seed.values.some((value) => finite(value) === null)
+            || (!state.initialized && (
+                state.previousClose !== null
+                || state.up.values.length !== 0
+                || state.seed.values.length !== 0
+                || state.previous !== 0
+            ))
+            || (state.initialized && state.previousClose === null)
+            || (state.seed.values.length > 0 && state.up.values.length < this.length)
+            || (state.seed.values.length === 0 && state.previous !== 0)) {
+            throw new TypeError('sschart: invalid VIDYA checkpoint');
+        }
+        this.up.restore(state.up);
+        this.down.restore(state.down);
+        this.seed.restore(state.seed);
+        this.initialized = state.initialized;
+        this.previousClose = state.previousClose;
+        this.seedSum = state.seed.values.reduce((sum, value) => sum + value, 0);
+        this.previous = state.previous;
+    }
 }
+
+export const VidyaIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    AdaptiveLengthParameters
+> = registerIndicator({
+    id: 'Vidya',
+    name: 'VIDYA',
+    description: 'Chande variable-index dynamic average driven by absolute momentum.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 15, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{
+        id: 'line', name: 'VIDYA',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#26a69a',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['vidya'],
+    processorFactory: (parameters) => new VidyaProcessor(
+        integer(parameters?.length, 15, 1, 500, 'length'),
+    ),
+});

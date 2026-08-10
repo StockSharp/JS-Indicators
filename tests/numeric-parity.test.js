@@ -15,37 +15,24 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { getCalcFn } = require('../src/calc/index.js');
-const { loadDumpStatus, readDump } = require('./csharp-dump.js');
+const { runtimeSeries } = require('./runtime-series.js');
+const { loadDumpStatus, readDump, requireDump } = require('./csharp-dump.js');
+const { assertRecorded } = require('./parity-exceptions.js');
+const { getIndicatorDefinition } = require('../src/index.js');
+
+/// The platform ran it and produced no value on any bar -- which is what an indicator that is not
+/// a series looks like from here. A runtime fact rather than a name, so a new one needs no entry.
+function nonScalar(cs) {
+    return Array.isArray(cs.values) && cs.values.every((v) => v === null || v === undefined);
+}
 
 // Relative + absolute tolerance for decimal (C#) vs double (JS).
-const TOL = 1e-6;
-
-// Multi-output JS calcs return an object of line arrays; the C# indicator exposes a
-// single scalar (its primary line). Map each to the JS field that line corresponds to.
-const MULTI_LINE = {
-    MovingAverageConvergenceDivergence: 'macd',
-    PercentagePriceOscillator: 'ppo',
-    SuperTrend: 'value',
-    MovingAverageCrossover: 'signal',
-};
-
-// Indicators deliberately left out of the scalar bar-for-bar comparison, each with the reason.
-// Asserted as an exact set below: a new exclusion cannot appear silently, and an entry that
-// stops applying fails too, so the list cannot rot.
-const NON_SCALAR = {
-    VolumeProfileIndicator: 'histogram over price levels — the C# exposes no single line (GetValue is null)',
-};
-
-// Indicators the platform ships that this port does not compute. Same exact-set rule: a new
-// StockSharp indicator lands here as a FAILURE rather than a line in the log nobody reads.
-const NO_JS_CALC = {
-    CandlePatternIndicator: 'pattern recognition, not a numeric series — no chart line to draw',
-};
-
-// Same, for the multi-line pass. Empty today: every complex indicator the platform dumps has a
-// JS calc. Kept as an explicit list so the first one that does not says so out loud.
-const COMPLEX_NO_JS_CALC = {};
+// Decimal on the platform, double here, so the two cannot agree to the last bit. This is the size
+// of that gap and nothing more: across every comparison in this suite the largest honest
+// difference measured is ~1.4e-11, so 1e-9 leaves two orders of magnitude of headroom while
+// refusing an arithmetic mistake. It used to be 1e-6, which on a price of 100 accepted an error of
+// 1e-4 -- five orders of magnitude of cover for a real bug.
+const TOL = 1e-9;
 
 // Compare an observed set against an allow-list, failing on BOTH unexpected members and stale
 // entries. Reported separately because the two mean opposite things: something new drifted in,
@@ -58,16 +45,6 @@ function assertAllowList(observed, allowed, what) {
     if (stale.length) problems.push(`${what} allow-list entries that no longer apply (remove them): ${stale.join(', ')}`);
     assert.equal(problems.length, 0, problems.join('\n'));
 }
-
-// StockSharp kinds asserted bar-for-bar: single `Length` param, single output — the unambiguous core.
-const ASSERT_KINDS = [
-    'SimpleMovingAverage',
-    'ExponentialMovingAverage',
-    'WeightedMovingAverage',
-    'SmoothedMovingAverage',
-    'RelativeStrengthIndex',
-    'AverageTrueRange',
-];
 
 // The StockSharp per-bar values are read live from .NET — no committed fixture — but the dump is
 // produced once by tools/parity-dump.mjs before node:test starts. This file no longer builds
@@ -102,7 +79,7 @@ function close(js, cs) {
 
 describe('numeric parity: JS calc vs StockSharp C#', () => {
     it('C# dumper provides a numeric --values dump (input + per-bar values)', (t) => {
-        if (!dump.ran) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+        requireDump(status);
         assert.ok(dump.data && Array.isArray(dump.data.input) && dump.data.input.length > 30,
             'expected { input: [...] } with a non-trivial series from --values');
         assert.ok(Array.isArray(dump.data.indicators) && dump.data.indicators.some((e) => Array.isArray(e.values)),
@@ -110,20 +87,30 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     });
 
     it('single-output core indicators match StockSharp bar-for-bar', (t) => {
-        if (!dump.ran) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+        requireDump(status);
         assert.ok(dump.data && Array.isArray(dump.data.input), 'no numeric dump (--values not implemented)');
 
         const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
         const byKind = new Map((dump.data.indicators || []).map((e) => [e.kind, e]));
         const failures = [];
 
-        for (const kind of ASSERT_KINDS) {
-            const cs = byKind.get(kind);
-            if (!cs || !Array.isArray(cs.values)) { failures.push(`${kind}: absent from C# --values dump`); continue; }
-            const fn = getCalcFn(kind);
-            if (!fn) { failures.push(`${kind}: no JS calc fn resolved`); continue; }
+        // Every kind the platform dumped, rather than a hand-picked core: the list this replaced
+        // named six, and the six were the ones nobody worried about.
+        for (const cs of dump.data.indicators) {
+            const kind = cs.kind;
+            if (!Array.isArray(cs.values)) continue;
+            // Not implemented here is a recorded fact, not a mismatch: the exact-set assertion in
+            // the scalar test below is what watches that list.
+            if (!getIndicatorDefinition(kind)) continue;
 
-            const jsOut = fn(candles, toJsParams(cs.params));
+            let jsOut = runtimeSeries(kind, candles, toJsParams(cs.params));
+            // The platform exposes one scalar; ours is whichever line the definition declares
+            // first, which is the indicator's own line. Derived, so a new multi-line indicator
+            // needs no entry anywhere.
+            if (jsOut && !Array.isArray(jsOut)) {
+                const definition = getIndicatorDefinition(kind);
+                if (definition) jsOut = jsOut[definition.outputs[0].id];
+            }
             if (!Array.isArray(jsOut) || jsOut.length !== cs.values.length) {
                 failures.push(`${kind}: length js=${jsOut && jsOut.length} cs=${cs.values.length}`);
                 continue;
@@ -140,7 +127,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     // a non-final value that never commits. For each perturbed forming bar the JS port — re-running its
     // calc over series + that bar — must land on the same preview the C# indicator yields non-finally.
     it('single-output core indicators match StockSharp on a changing (non-final) last candle', (t) => {
-        if (!dump.ran) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+        requireDump(status);
         assert.ok(dump.data && Array.isArray(dump.data.probes) && dump.data.probes.length > 0,
             'expected { probes: [...] } from --values for the changing-candle check');
 
@@ -148,16 +135,22 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
         const byKind = new Map((dump.data.indicators || []).map((e) => [e.kind, e]));
         const failures = [];
 
-        for (const kind of ASSERT_KINDS) {
-            const cs = byKind.get(kind);
-            if (!cs || !Array.isArray(cs.previews)) { failures.push(`${kind}: no C# previews`); continue; }
-            const fn = getCalcFn(kind);
-            if (!fn) { failures.push(`${kind}: no JS calc fn`); continue; }
+        // Every kind the dump carries previews for, not a hand-picked handful: the platform
+        // records them for 126 indicators and this used to check six of them.
+        for (const cs of dump.data.indicators) {
+            const kind = cs.kind;
+            if (!Array.isArray(cs.previews)) continue;
+            const definition = getIndicatorDefinition(kind);
+            if (!definition) continue;
 
             for (let pi = 0; pi < dump.data.probes.length; pi++) {
                 const p = dump.data.probes[pi];
                 const candles = base.concat([{ time: base.length, open: p.o, high: p.h, low: p.l, close: p.c, volume: p.v }]);
-                const jsOut = fn(candles, toJsParams(cs.params));
+                // The platform made these numbers with IsFinal=false, so the probe goes in as a
+                // preview here too. Appending it as a closed candle compared an open bar against a
+                // finished one and called the difference parity.
+                let jsOut = runtimeSeries(kind, candles, toJsParams(cs.params), true);
+                if (jsOut && !Array.isArray(jsOut)) jsOut = jsOut[definition.outputs[0].id];
                 const jsv = jsOut.length ? (jsOut[jsOut.length - 1] ? jsOut[jsOut.length - 1].value : null) : null;
                 if (!close(jsv, cs.previews[pi])) failures.push(`${kind} probe#${pi} (Δclose=${(p.c - base[base.length - 1].close).toFixed(2)}): js=${jsv} cs=${cs.previews[pi]}`);
             }
@@ -169,7 +162,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     // multi-output ones) through its JS calc fn over the final series and assert none diverge.
     // This locks in the whole port against StockSharp; non-scalar indicators are excluded explicitly.
     it('every scalar indicator matches StockSharp bar-for-bar', (t) => {
-        if (!dump.ran) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+        requireDump(status);
         const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
         const matched = [];
         const diverged = [];
@@ -177,13 +170,21 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
         const excluded = [];
         for (const cs of dump.data.indicators || []) {
             if (!Array.isArray(cs.values)) continue; // complex / multi-output: handled later
-            if (cs.kind in NON_SCALAR) { excluded.push(cs.kind); continue; }
-            const fn = getCalcFn(cs.kind);
-            if (!fn) { noFn.push(cs.kind); continue; }
+            // "We never implemented it" is asked first: it is the more actionable of the two, and
+            // an unported indicator whose C# side happens to be null everywhere would otherwise be
+            // filed as merely uncomparable.
+            if (!getIndicatorDefinition(cs.kind)) { noFn.push(cs.kind); continue; }
+            if (nonScalar(cs)) { excluded.push(cs.kind); continue; }
             let jsOut;
-            try { jsOut = fn(candles, toJsParams(cs.params)); }
+            try { jsOut = runtimeSeries(cs.kind, candles, toJsParams(cs.params)); }
             catch { diverged.push(cs.kind + '(threw)'); continue; }
-            if (MULTI_LINE[cs.kind] && jsOut && !Array.isArray(jsOut)) jsOut = jsOut[MULTI_LINE[cs.kind]];
+            // The platform exposes one scalar; ours is whichever line the definition declares first,
+            // which is what a chart calls the indicator's own line. Derived, so a new multi-line
+            // indicator needs no entry anywhere.
+            if (jsOut && !Array.isArray(jsOut)) {
+                const primary = getIndicatorDefinition(cs.kind);
+                if (primary) jsOut = jsOut[primary.outputs[0].id];
+            }
             if (!Array.isArray(jsOut) || jsOut.length !== cs.values.length) { diverged.push(cs.kind + '(shape)'); continue; }
             const csFormed = cs.values.findIndex((v) => v !== null && v !== undefined);
             let firstMism = -1;
@@ -214,8 +215,8 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
         // Everything skipped above has to be skipped ON PURPOSE. Without this the two `continue`
         // branches are a silent hole: a StockSharp indicator we never ported, or one whose calc
         // stopped resolving, would just shrink the "match" count.
-        assertAllowList(noFn, NO_JS_CALC, 'scalar indicators with no JS calc fn');
-        assertAllowList(excluded, NON_SCALAR, 'scalar indicators excluded');
+        assertRecorded('scalar-no-js-calc', noFn, 'scalar indicators with no JS calc fn');
+        assertRecorded('scalar-non-scalar', excluded, 'scalar indicators excluded');
     });
 
     // Multi-line (complex) indicators: the C# dump carries one value array per inner indicator.
@@ -223,7 +224,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     // line reproduces it bar-for-bar, so field-name differences don't matter; every C# line must
     // be reproduced by some JS line.
     it('every complex indicator line matches StockSharp bar-for-bar', (t) => {
-        if (!dump.ran) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+        requireDump(status);
         const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
 
         const asLine = (arr) => arr.map((p) => (p && typeof p === 'object' && !Array.isArray(p)) ? p.value : p);
@@ -246,11 +247,10 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
         const noFn = [];
         for (const cs of dump.data.indicators || []) {
             if (!Array.isArray(cs.lines)) continue;
-            const fn = getCalcFn(cs.kind);
-            if (!fn) { noFn.push(cs.kind); continue; }
+            if (!getIndicatorDefinition(cs.kind)) { noFn.push(cs.kind); continue; }
             let cand;
-            try { cand = jsLines(fn(candles, toJsParams(cs.params))); }
-            catch { diverged.push(cs.kind + '(threw)'); continue; }
+            try { cand = jsLines(runtimeSeries(cs.kind, candles, toJsParams(cs.params))); }
+            catch (error) { diverged.push(`${cs.kind} (threw: ${error.message})`); continue; }
             const unmatched = [];
             for (let li = 0; li < cs.lines.length; li++) {
                 if (!cand.some((jc) => lineMatch(jc.values, cs.lines[li]))) unmatched.push((cs.lineNames && cs.lineNames[li]) + '#' + li);
@@ -263,6 +263,6 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
         if (diverged.length) console.log('[numeric-parity] complex diverge:', diverged.join('  |  '));
         if (noFn.length) console.log('[numeric-parity] complex no-js-fn:', noFn.join(', '));
         assert.equal(diverged.length, 0, 'complex indicators diverging from the C# dump:\n' + diverged.join('\n'));
-        assertAllowList(noFn, COMPLEX_NO_JS_CALC, 'complex indicators with no JS calc fn');
+        assert.deepEqual(noFn, [], 'complex indicators with no JS calc fn: ' + noFn.join(', '));
     });
 });

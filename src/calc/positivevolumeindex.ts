@@ -1,51 +1,110 @@
-// Positive Volume Index — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\PositiveVolumeIndex.cs.
-// Deviations from .cs: none.
-//   pvi seed = 1000
-//   per bar: if prevClose!=0 && prevVolume!=0 && volume>0 && volume>prevVolume:
-//                pvi += pvi * (close - prevClose) / prevClose
-//            else: pvi unchanged.
-// Mirror image of NVI (see nvi.js).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    lineStyle,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface PositiveVolumeIndexCheckpoint {
+    readonly previousClose: number;
+    readonly previousVolume: number;
+    readonly value: number;
+}
 
-export function calcPositiveVolumeIndex(candles: CandlePoint[], _params?: IndicatorParams): IndicatorPoint[] {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export class PositiveVolumeIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    PositiveVolumeIndexCheckpoint
+> {
+    private previousClose = 0;
+    private previousVolume = 0;
+    private current = 1_000;
 
-    const n = candles.length;
-    const out = new Array(n);
+    constructor() { super(['line']); }
 
-    let prevClose = 0;
-    let prevVolume = 0;
-    let pvi = 1000;
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const t = c && c.time;
-        const cl = c && c.close;
-        const v = c && c.volume;
-        const okClose = typeof cl === 'number' && Number.isFinite(cl);
-        const okVol = typeof v === 'number' && Number.isFinite(v);
-
-        if (!okClose || !okVol) {
-            // Carry without advancing state.
-            out[i] = { time: t, value: pvi };
-            continue;
-        }
-
-        let nextPvi = pvi;
-        if (prevClose !== 0 && prevVolume !== 0 && v > 0) {
-            if (v > prevVolume) {
-                const pct = (cl - prevClose) / prevClose;
-                nextPvi = pvi + pvi * pct;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const volume = finite(input.value?.volume);
+        let value = this.current;
+        if (close !== null && volume !== null) {
+            if (this.previousClose !== 0 && this.previousVolume !== 0 && volume > 0
+                && volume > this.previousVolume) {
+                value = finite(
+                    this.current + this.current * (close - this.previousClose) / this.previousClose,
+                ) ?? this.current;
+            }
+            if (commit) {
+                this.previousClose = close;
+                this.previousVolume = volume;
+                this.current = value;
             }
         }
-
-        prevClose = cl;
-        prevVolume = v;
-        pvi = nextPvi;
-
-        out[i] = { time: t, value: pvi };
+        return {
+            isFormed: true,
+            values: [this.output('line', value, input.index)],
+        };
     }
 
-    return out;
+    protected resetState(): void {
+        this.previousClose = 0;
+        this.previousVolume = 0;
+        this.current = 1_000;
+    }
+
+    protected captureState(): PositiveVolumeIndexCheckpoint {
+        return Object.freeze({
+            previousClose: this.previousClose,
+            previousVolume: this.previousVolume,
+            value: this.current,
+        });
+    }
+
+    protected restoreState(state: PositiveVolumeIndexCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || finite(state.previousClose) === null
+            || finite(state.previousVolume) === null
+            || finite(state.value) === null) {
+            throw new TypeError('sschart: invalid Positive Volume Index checkpoint');
+        }
+        this.previousClose = state.previousClose;
+        this.previousVolume = state.previousVolume;
+        this.current = state.value;
+    }
 }
+
+export const PositiveVolumeIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'PositiveVolumeIndex',
+    name: 'Positive Volume Index',
+    description: 'Cumulative price index updated only when volume rises.',
+    category: IndicatorCategory.Volume,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{
+        id: 'line', name: 'PVI',
+        defaultStyle: lineStyle('#42a5f5'),
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['pvi', 'positivevolumeindex'],
+    processorFactory: () => new PositiveVolumeIndexProcessor(),
+});

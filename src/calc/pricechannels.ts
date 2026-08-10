@@ -1,51 +1,124 @@
-// Price Channels — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\PriceChannels.cs.
-// Deviations from .cs: none. Donchian-style upper/lower bands without a
-// middle line.
-//   upper[i] = max(high) over candles[i-length+1..i]
-//   lower[i] = min(low)  over candles[i-length+1..i]
-// First (length-1) bars are null on both series (warm-up window).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMaximum,
+    RollingMinimum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    CompoundLengthParameters,
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-export interface PriceChannelsSeries {
-    upper: IndicatorPoint[];
-    lower: IndicatorPoint[];
+export interface PriceChannelsCheckpoint {
+    readonly high: RollingWindowCheckpoint;
+    readonly low: RollingWindowCheckpoint;
 }
 
-export function calcPriceChannels(candles: CandlePoint[], params?: IndicatorParams): PriceChannelsSeries {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 20;
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { upper: [], lower: [] };
-    }
-    const n = candles.length;
-    const upper = new Array(n);
-    const lower = new Array(n);
-    for (let i = 0; i < n; i++) {
-        upper[i] = { time: candles[i].time, value: null };
-        lower[i] = { time: candles[i].time, value: null };
-    }
-    if (length <= 0) return { upper, lower };
+export class PriceChannelsProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    PriceChannelsCheckpoint
+> {
+    private readonly high: RollingMaximum;
+    private readonly low: RollingMinimum;
 
-    for (let i = length - 1; i < n; i++) {
-        let hi = -Infinity;
-        let lo = +Infinity;
-        let bad = false;
-        for (let j = i - length + 1; j <= i; j++) {
-            const c = candles[j];
-            const h = c && c.high;
-            const l = c && c.low;
-            if (typeof h !== 'number' || !Number.isFinite(h)
-                || typeof l !== 'number' || !Number.isFinite(l)) {
-                bad = true;
-                break;
-            }
-            if (h > hi) hi = h;
-            if (l < lo) lo = l;
+    constructor(readonly length: number) {
+        super(['upper', 'lower']);
+        integer(length, length, 1, 500, 'length');
+        this.high = new RollingMaximum(length);
+        this.low = new RollingMinimum(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const upper = commit
+            ? this.high.push(finite(input.value?.high))
+            : this.high.preview(finite(input.value?.high));
+        const lower = commit
+            ? this.low.push(finite(input.value?.low))
+            : this.low.preview(finite(input.value?.low));
+        const formed = upper !== null && lower !== null;
+        return {
+            isFormed: formed,
+            values: [
+                this.output('upper', formed ? upper : null, input.index),
+                this.output('lower', formed ? lower : null, input.index),
+            ],
+        };
+    }
+
+    protected resetState(): void {
+        this.high.reset();
+        this.low.reset();
+    }
+
+    protected captureState(): PriceChannelsCheckpoint {
+        return Object.freeze({
+            high: this.high.checkpoint(),
+            low: this.low.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: PriceChannelsCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || state.high?.values?.length !== state.low?.values?.length) {
+            throw new TypeError('sschart: invalid Price Channels checkpoint');
         }
-        if (bad) continue;
-        const t = candles[i].time;
-        upper[i] = { time: t, value: hi };
-        lower[i] = { time: t, value: lo };
+        this.high.restore(state.high);
+        this.low.restore(state.low);
     }
-    return { upper, lower };
 }
+
+export const PriceChannelsIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    CompoundLengthParameters
+> = registerIndicator({
+    id: 'PriceChannels',
+    name: 'Price Channels',
+    description: 'Trailing highest-high and lowest-low price channel.',
+    category: IndicatorCategory.SupportResistance,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 20, min: 1, max: 500, step: 1,
+    }],
+    outputs: [
+        {
+            id: 'upper', name: 'Upper',
+            defaultStyle: style(IndicatorSeriesStyle.Band, '#42a5f5'),
+        },
+        {
+            id: 'lower', name: 'Lower',
+            defaultStyle: style(IndicatorSeriesStyle.Band, '#42a5f5'),
+        },
+    ],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+    aliases: ['pc', 'pricechannels'],
+    painter: 'band',
+    processorFactory: (parameters) => new PriceChannelsProcessor(
+        integer(parameters?.length, 20, 1, 500, 'length'),
+    ),
+});

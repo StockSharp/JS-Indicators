@@ -1,46 +1,109 @@
-// Williams %R (Larry Williams) — momentum oscillator scaled to -100..0.
-//   %R[i] = -100 * (highestHigh(N) - close[i]) / (highestHigh(N) - lowestLow(N))
-// where N == `length` and the window is the last N bars ending at i.
-// Null until index `length-1` (warm-up). A perfectly flat window (highestHigh == lowestLow)
-// has no defined %R -- the position of the close within a zero-width range is not a number --
-// and StockSharp emits nothing there, so neither does this.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMaximum,
+    RollingMinimum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-/**
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcWilliamsR(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    for (let i = length - 1; i < n; i++) {
-        let hi = -Infinity;
-        let lo = +Infinity;
-        let bad = false;
-        for (let j = i - length + 1; j <= i; j++) {
-            const c = candles[j];
-            const h = c && c.high;
-            const l = c && c.low;
-            if (typeof h !== 'number' || !Number.isFinite(h) ||
-                typeof l !== 'number' || !Number.isFinite(l)) { bad = true; break; }
-            if (h > hi) hi = h;
-            if (l < lo) lo = l;
-        }
-        const close = candles[i] && candles[i].close;
-        if (bad || typeof close !== 'number' || !Number.isFinite(close)) {
-            out[i] = { time: candles[i].time, value: null };
-            continue;
-        }
-        const range = hi - lo;
-        out[i] = { time: candles[i].time, value: range === 0 ? null : -100 * (hi - close) / range };
-    }
-    return out;
+export interface WilliamsRCheckpoint {
+    readonly high: RollingWindowCheckpoint;
+    readonly low: RollingWindowCheckpoint;
 }
+
+export class WilliamsRProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    WilliamsRCheckpoint
+> {
+    private readonly high: RollingMaximum;
+    private readonly low: RollingMinimum;
+
+    constructor(readonly length: number) {
+        super(['line']);
+        this.high = new RollingMaximum(length);
+        this.low = new RollingMinimum(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = commit
+            ? this.high.push(finite(input.value?.high))
+            : this.high.preview(finite(input.value?.high));
+        const low = commit
+            ? this.low.push(finite(input.value?.low))
+            : this.low.preview(finite(input.value?.low));
+        const close = finite(input.value?.close);
+        let value: number | null = null;
+        if (high !== null && low !== null && close !== null) {
+            const range = high - low;
+            // A zero-width range has no defined %R; the platform emits nothing, and so must this
+            // or the incremental path would disagree with the batch one on flat data.
+            if (range !== 0) value = -100 * (high - close) / range;
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.high.reset();
+        this.low.reset();
+    }
+    protected captureState(): WilliamsRCheckpoint {
+        return Object.freeze({
+            high: this.high.checkpoint(),
+            low: this.low.checkpoint(),
+        });
+    }
+    protected restoreState(state: WilliamsRCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || state.high?.values?.length !== state.low?.values?.length) {
+            throw new TypeError('sschart: invalid Williams R checkpoint');
+        }
+        this.high.restore(state.high);
+        this.low.restore(state.low);
+    }
+}
+
+export const WilliamsRIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'WilliamsR',
+    name: 'Williams R',
+    description: 'Close position within the recent high-low range, scaled from -100 to 0.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(5)],
+    outputs: [{ id: 'line', name: 'Williams R', defaultStyle: lineStyle('#7e57c2') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['williamsr'],
+    scaleRange: { min: -100, max: 0 },
+    levels: [-80, -20],
+    processorFactory: (parameters) => new WilliamsRProcessor(resolvedLength(parameters, 14)),
+});

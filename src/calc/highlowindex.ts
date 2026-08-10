@@ -1,55 +1,125 @@
-// High Low Index (HLI).
-// Port of StockSharp Algo.Indicators HighLowIndex.cs.
-//
-// Once `length` finite candles have been pushed:
-//   highestHigh = max(high) over last `length` bars (inclusive of current)
-//   lowestLow   = min(low)  over last `length` bars (inclusive of current)
-//   range       = highestHigh - lowestLow
-//   if range == 0: HLI = 50
-//   else:          HLI = (current.high - lowestLow) / range * 100
-//
-// .cs deviation notes:
-// (a) Warm-up: CalcIsFormed gates on `_highBuffer.Count == Length`, so
-//     the first non-null output is at index (length - 1).
-// (b) `Measure = Percent` is metadata only — the formula already returns
-//     a percent in [0, 100].
-// (c) `IsFinal=false` branch (the .cs's intra-bar `_highBuffer.Max.Value
-//     .Max(candle.HighPrice)` path) is ignored for closed-bar batches.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMaximum,
+    RollingMinimum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface HighLowIndexCheckpoint {
+    readonly high: RollingWindowCheckpoint;
+    readonly low: RollingWindowCheckpoint;
+}
 
-export function calcHighLowIndex(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export class HighLowIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    HighLowIndexCheckpoint
+> {
+    private readonly high: RollingMaximum;
+    private readonly low: RollingMinimum;
 
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0 || n < length) return out;
-
-    for (let i = length - 1; i < n; i++) {
-        let mxH = -Infinity;
-        let mnL = Infinity;
-        let bad = false;
-        for (let k = i - length + 1; k <= i; k++) {
-            const c = candles[k];
-            const h = c && c.high;
-            const l = c && c.low;
-            if (typeof h !== 'number' || !Number.isFinite(h) ||
-                typeof l !== 'number' || !Number.isFinite(l)) {
-                bad = true;
-                break;
-            }
-            if (h > mxH) mxH = h;
-            if (l < mnL) mnL = l;
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500) {
+            throw new RangeError(
+                'sschart: High Low Index length must be an integer from 1 to 500',
+            );
         }
-        if (bad) continue;
-
-        const cur = candles[i];
-        const range = mxH - mnL;
-        const value = range === 0 ? 50 : (cur.high - mnL) / range * 100;
-        out[i] = { time: cur.time, value };
+        this.high = new RollingMaximum(length);
+        this.low = new RollingMinimum(length);
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const currentHigh = finite(input.value?.high);
+        const currentLow = finite(input.value?.low);
+        const maximum = commit
+            ? this.high.push(currentHigh)
+            : this.high.preview(currentHigh);
+        const minimum = commit
+            ? this.low.push(currentLow)
+            : this.low.preview(currentLow);
+        let value: number | null = null;
+        if (maximum !== null && minimum !== null && currentHigh !== null) {
+            const range = maximum - minimum;
+            value = range === 0 ? 50 : finite((currentHigh - minimum) / range * 100);
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.high.reset();
+        this.low.reset();
+    }
+
+    protected captureState(): HighLowIndexCheckpoint {
+        return Object.freeze({
+            high: this.high.checkpoint(),
+            low: this.low.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: HighLowIndexCheckpoint): void {
+        const valid = (checkpoint: RollingWindowCheckpoint) => (
+            checkpoint !== null
+            && typeof checkpoint === 'object'
+            && Array.isArray(checkpoint.values)
+            && checkpoint.values.length <= this.length
+            && checkpoint.values.every((value) => value === null || finite(value) !== null)
+        );
+        if (state === null || typeof state !== 'object'
+            || !valid(state.high) || !valid(state.low)
+            || state.high.values.length !== state.low.values.length) {
+            throw new TypeError('sschart: invalid High Low Index checkpoint');
+        }
+        this.high.restore(state.high);
+        this.low.restore(state.low);
+    }
 }
+
+export const HighLowIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'HighLowIndex',
+    name: 'High Low Index',
+    description: 'Current high position within the trailing high-low range.',
+    category: IndicatorCategory.MarketStrength,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14)],
+    outputs: [{ id: 'line', name: 'High Low Index', defaultStyle: lineStyle('#26c6da') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['highlowindex'],
+    scaleRange: { min: 0, max: 100 },
+    levels: [50],
+    processorFactory: (parameters) => new HighLowIndexProcessor(
+        resolvedLength(parameters, 14),
+    ),
+});

@@ -1,89 +1,125 @@
-// Force Index (Alexander Elder).
-//   raw[i]   = (close[i] - close[i-1]) * volume[i]      for i >= 1
-//   force[i] = EMA(raw, length)[i]
-// Default `length` is 13.
-//
-// Source mapping: StockSharp ships TWO functionally identical classes in
-// Algo.Indicators:
-//   • ForceIndex.cs       (LocalizedStrings "FI" / "ForceIndex")
-//   • ElderForceIndex.cs  (LocalizedStrings "ElderForceIndex")
-// Both inherit ExponentialMovingAverage, both default Length=13, and both
-// compute exactly `(close - prevClose) * volume` then run that scalar
-// through the base EMA pipeline. The only daylight between them is the
-// order of `_prevClose` updates inside OnProcess — but for IsFinal=true
-// inputs (which is all we ever see in our batch port) the resulting
-// series are identical bar-for-bar. We treat ForceIndex.cs as the
-// canonical implementation and expose ElderForceIndex as an alias
-// pointing at the same code (matches the way the .cs class names are
-// used interchangeably in the StockSharp docs).
-//
-// EMA convention: SMA-seeded over the first `length` finite raw values
-// (matches calcEMA / calcBullPower / calcBearPower in this folder).
-// First (length) raw samples exist starting at i=1, so the first
-// non-null Force Index output lands at index `length`.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    ExponentialMovingAverage,
+    type SeededMovingAverageCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-export function calcForceIndex(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 13;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (length <= 0 || n < length + 1) return out;
-
-    // Build the raw force series. raw[0] is undefined (no prev close), so it
-    // is excluded; the first usable raw lands at i=1.
-    const raw = new Array(n);
-    raw[0] = NaN;
-    for (let i = 1; i < n; i++) {
-        const c = candles[i] && candles[i].close;
-        const cp = candles[i - 1] && candles[i - 1].close;
-        const v = candles[i] && candles[i].volume;
-        if (typeof c !== 'number' || !Number.isFinite(c) ||
-            typeof cp !== 'number' || !Number.isFinite(cp) ||
-            typeof v !== 'number' || !Number.isFinite(v)) {
-            raw[i] = NaN;
-        } else {
-            raw[i] = (c - cp) * v;
-        }
-    }
-
-    // EMA over raw[1..]. SMA-seed using the first `length` finite samples.
-    let seedSum = 0;
-    let seedCount = 0;
-    let seedDone = false;
-    let prev = 0;
-    const k = 2 / (length + 1);
-
-    for (let i = 1; i < n; i++) {
-        const r = raw[i];
-        const ok = typeof r === 'number' && Number.isFinite(r);
-        if (!seedDone) {
-            if (!ok) continue;
-            seedSum += r;
-            seedCount++;
-            if (seedCount === length) {
-                prev = seedSum / length;
-                out[i] = { time: candles[i].time, value: prev };
-                seedDone = true;
-            }
-            continue;
-        }
-        if (!ok) {
-            // Hold previous EMA; emit null for this bar.
-            out[i] = { time: candles[i].time, value: null };
-            continue;
-        }
-        prev = r * k + prev * (1 - k);
-        out[i] = { time: candles[i].time, value: prev };
-    }
-    return out;
+export interface ForceIndexCheckpoint {
+    readonly initialized: boolean;
+    readonly previousClose: number | null;
+    readonly average: SeededMovingAverageCheckpoint;
 }
 
-// Alias — ElderForceIndex.cs is functionally identical to ForceIndex.cs
-// (both default Length=13, both compute (close - prevClose) * volume then EMA).
-export const calcElderForceIndex = calcForceIndex;
+export class ForceIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    ForceIndexCheckpoint
+> {
+    private initialized = false;
+    private previousClose: number | null = null;
+    private readonly average: ExponentialMovingAverage;
+
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500)
+            throw new RangeError('sschart: Force Index length must be an integer from 1 to 500');
+        this.average = new ExponentialMovingAverage(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        if (!this.initialized) {
+            if (commit) {
+                this.initialized = true;
+                this.previousClose = close;
+            }
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const volume = finite(input.value?.volume);
+        const force = close === null || this.previousClose === null || volume === null
+            ? null
+            : finite((close - this.previousClose) * volume);
+        const value = force === null
+            ? null
+            : (commit ? this.average.push(force) : this.average.preview(force));
+        if (commit) this.previousClose = close;
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.initialized = false;
+        this.previousClose = null;
+        this.average.reset();
+    }
+
+    protected captureState(): ForceIndexCheckpoint {
+        return Object.freeze({
+            initialized: this.initialized,
+            previousClose: this.previousClose,
+            average: this.average.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: ForceIndexCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || typeof state.initialized !== 'boolean'
+            || (state.previousClose !== null && finite(state.previousClose) === null)
+            || (!state.initialized && state.previousClose !== null)) {
+            throw new TypeError('sschart: invalid Force Index checkpoint');
+        }
+        this.average.restore(state.average);
+        this.initialized = state.initialized;
+        this.previousClose = state.previousClose;
+    }
+}
+
+export const ForceIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'ForceIndex',
+    name: 'Force Index',
+    description: 'Exponential average of close-to-close change multiplied by volume.',
+    category: IndicatorCategory.Volume,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(13)],
+    outputs: [{ id: 'line', name: 'Force Index', defaultStyle: lineStyle('#7e57c2') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Volume,
+    aliases: ['forceindex', 'elderforceindex', 'ElderForceIndex'],
+    levels: [0],
+    processorFactory: (parameters) => new ForceIndexProcessor(
+        resolvedLength(parameters, 13),
+    ),
+});

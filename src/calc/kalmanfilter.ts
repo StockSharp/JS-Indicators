@@ -1,100 +1,175 @@
-// Kalman Filter (adaptive 1-D price smoother).
-// Port of StockSharp Algo.Indicators KalmanFilter.cs.
-//
-// State:
-//   lastEstimate (x̂)  — running estimate of the underlying signal
-//   errorCovariance (P) — uncertainty of that estimate, init = 1
-//
-// Per bar (with z = current close):
-//   priorEstimate        = lastEstimate
-//   priorErrorCovariance = errorCovariance + processNoise (Q)
-//   kalmanGain (K)       = priorErrorCovariance / (priorErrorCovariance + measurementNoise (R))
-//   newEstimate          = priorEstimate + K * (z - priorEstimate)
-//   errorCovariance      = (1 - K) * priorErrorCovariance
-//   output               = newEstimate
-//
-// Seed: the first bar sets lastEstimate = z, errorCovariance = 1, and the
-// output for that bar IS the raw close — no filtering yet. From bar 2
-// onward the recurrence above runs.
-//
-// Defaults (match .cs):
-//   processNoise (Q)     = 1e-5
-//   measurementNoise (R) = 1e-3
-//   length               = 10  (only used by the .cs to gate IsFormed; it
-//                               does not affect emitted values, so we
-//                               accept the param but never read it after
-//                               validation.)
-//
-// .cs deviation notes:
-// (a) Length in the .cs controls Buffer.Count → IsFormed timing. Since this
-//     calc emits a value for every bar (the .cs returns the estimate even
-//     before IsFormed) we don't need to gate output on it. We accept the
-//     param for API parity but it is otherwise inert.
-// (b) The .cs throws if Q or R are <= 0. We clamp to a tiny positive value
-//     instead so a bad UI input doesn't crash the chart.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    LENGTH_STYLE,
+    close,
+    resolvedLength,
+} from './shared/core.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface KalmanFilterParameters extends IndicatorParameters {
+    readonly length: number;
+    readonly processNoise: number;
+    readonly measurementNoise: number;
+}
 
-/**
- * @typedef {object} CandlePoint
- * @property {string|number} time
- * @property {number} open
- * @property {number} high
- * @property {number} low
- * @property {number} close
- * @property {number} [volume]
- */
+export interface KalmanFilterCheckpoint {
+    readonly lastEstimate: number | null;
+    readonly errorCovariance: number;
+    readonly count: number;
+}
 
-/**
- * @typedef {{time: string|number, value: number|null}} IndicatorPoint
- */
+export function resolvedPositive(value: unknown, fallback: number, name: string): number {
+    const resolved = value ?? fallback;
+    if (typeof resolved !== 'number' || !Number.isFinite(resolved) || resolved <= 0) {
+        throw new RangeError(`sschart: indicator ${name} must be a positive finite number`);
+    }
+    return resolved;
+}
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number, processNoise?: number, measurementNoise?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
+export class KalmanFilterProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    KalmanFilterCheckpoint
+> {
+    private lastEstimate: number | null = null;
+    private errorCovariance = 1;
+    private count = 0;
 
-export function calcKalmanFilter(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    let processNoise = params && Number.isFinite(params.processNoise) ? +params.processNoise : 1e-5;
-    let measurementNoise = params && Number.isFinite(params.measurementNoise) ? +params.measurementNoise : 1e-3;
-    if (processNoise <= 0) processNoise = 1e-12;
-    if (measurementNoise <= 0) measurementNoise = 1e-12;
-
-    const length = params && Number.isFinite(params.length) && params.length > 0 ? (params.length | 0) : 10;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    let lastEstimate: number | null = null;
-    let errorCovariance = 1;
-    let validCount = 0;
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i] && candles[i].close;
-        if (typeof c !== 'number' || !Number.isFinite(c)) {
-            // Bad bar: keep state, emit null.
-            continue;
+    constructor(
+        readonly length: number,
+        readonly processNoise: number,
+        readonly measurementNoise: number,
+    ) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500) {
+            throw new RangeError(
+                'sschart: Kalman Filter length must be an integer from 1 to 500',
+            );
         }
-        validCount++;
-        let estimate: number;
-        if (lastEstimate === null) {
-            lastEstimate = c;
-            errorCovariance = 1;
-            estimate = c;
-        } else {
-            const priorEstimate = lastEstimate;
-            const priorErr = errorCovariance + processNoise;
-            const k = priorErr / (priorErr + measurementNoise);
-            estimate = priorEstimate + k * (c - priorEstimate);
-            errorCovariance = (1 - k) * priorErr;
-            lastEstimate = estimate;
+        if (!Number.isFinite(processNoise) || processNoise <= 0) {
+            throw new RangeError('sschart: Kalman Filter process noise must be positive and finite');
         }
-        // Not formed until `length` values processed (DecimalLengthIndicator).
-        if (validCount >= length) out[i] = { time: candles[i].time, value: estimate };
+        if (!Number.isFinite(measurementNoise) || measurementNoise <= 0) {
+            throw new RangeError(
+                'sschart: Kalman Filter measurement noise must be positive and finite',
+            );
+        }
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const measurement = close(input);
+        if (measurement === null) {
+            return {
+                isFormed: this.count >= this.length,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        let estimate = measurement;
+        let nextErrorCovariance = 1;
+        if (this.lastEstimate !== null) {
+            const priorErrorCovariance = this.errorCovariance + this.processNoise;
+            const kalmanGain = priorErrorCovariance
+                / (priorErrorCovariance + this.measurementNoise);
+            estimate = this.lastEstimate + kalmanGain * (measurement - this.lastEstimate);
+            nextErrorCovariance = (1 - kalmanGain) * priorErrorCovariance;
+        }
+        const nextCount = Math.min(this.length, this.count + 1);
+        if (commit) {
+            this.lastEstimate = estimate;
+            this.errorCovariance = nextErrorCovariance;
+            this.count = nextCount;
+        }
+        const formed = nextCount >= this.length;
+        return {
+            isFormed: formed,
+            values: [this.output('line', formed ? estimate : null, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.lastEstimate = null;
+        this.errorCovariance = 1;
+        this.count = 0;
+    }
+
+    protected captureState(): KalmanFilterCheckpoint {
+        return Object.freeze({
+            lastEstimate: this.lastEstimate,
+            errorCovariance: this.errorCovariance,
+            count: this.count,
+        });
+    }
+
+    protected restoreState(state: KalmanFilterCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || (state.lastEstimate !== null
+                && (typeof state.lastEstimate !== 'number'
+                    || !Number.isFinite(state.lastEstimate)))
+            || typeof state.errorCovariance !== 'number'
+            || !Number.isFinite(state.errorCovariance) || state.errorCovariance < 0
+            || !Number.isInteger(state.count) || state.count < 0 || state.count > this.length
+            || (state.count === 0) !== (state.lastEstimate === null)) {
+            throw new TypeError('sschart: invalid Kalman Filter checkpoint');
+        }
+        this.lastEstimate = state.lastEstimate;
+        this.errorCovariance = state.errorCovariance;
+        this.count = state.count;
+    }
 }
+
+export const KalmanFilterIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    KalmanFilterParameters
+> = registerIndicator({
+    id: 'KalmanFilter',
+    name: 'Kalman Filter',
+    description: 'Adaptive one-dimensional price estimate with configurable process and measurement noise.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+            defaultValue: 10, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'processNoise', name: 'Process Noise', type: IndicatorParameterType.Number,
+            defaultValue: 0.00001, min: 1e-12, max: 1e12, step: 0.00001,
+        },
+        {
+            id: 'measurementNoise', name: 'Measurement Noise',
+            type: IndicatorParameterType.Number,
+            defaultValue: 0.001, min: 1e-12, max: 1e12, step: 0.001,
+        },
+    ],
+    outputs: [{
+        id: 'line',
+        name: 'Kalman',
+        defaultStyle: { ...LENGTH_STYLE, color: '#26a69a' },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['kalman', 'kalmanfilter'],
+    processorFactory: (parameters) => new KalmanFilterProcessor(
+        resolvedLength(parameters, 10, 1),
+        resolvedPositive(parameters?.processNoise, 0.00001, 'processNoise'),
+        resolvedPositive(parameters?.measurementNoise, 0.001, 'measurementNoise'),
+    ),
+});

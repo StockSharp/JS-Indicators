@@ -13,50 +13,25 @@
 //                constant, rising, falling, spike, gap, alternating, zero volume, three bars
 //                (stress.json, produced by --stress)
 //
-// Both are exact allow-lists: an unlisted divergence fails, and so does a listed one that no
-// longer applies. That is the only form that does not rot -- a log line saying "12 diverge" is
-// read once and never again.
+// A divergence fails. There is no list to put one on, deliberately: a written-down bug is still a
+// green test, and a green test is what everybody reads. If this file is red, the port disagrees
+// with the platform somewhere, and the message names every place.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { getCalcFn } = require('../src/calc/index.js');
-const { loadDumpStatus, readDump } = require('./csharp-dump.js');
+const { runtimeSeries } = require('./runtime-series.js');
+const { getIndicatorDefinition } = require('../src/index.js');
+const { loadDumpStatus, readDump, requireDump } = require('./csharp-dump.js');
+const { assertRecorded } = require('./parity-exceptions.js');
 
-// Relative + absolute tolerance for decimal (C#) vs double (JS), same as numeric-parity.
-const TOL = 1e-6;
-
-// ---------------------------------------------------------------------------------------------
-// Known divergences. Each key is `Kind@length` or `Kind@shape`; each value says what differs and
-// why it is not fixed yet. Anything here is a bug that is written down, not a bug that is allowed.
-// ---------------------------------------------------------------------------------------------
-
-const MATRIX_DIVERGENCES = {};
-
-const STRESS_DIVERGENCES = {
-    // Not a port defect, and not fixable by porting harder: the zone collapses and both sides then
-    // read their own rounding noise. After the spike the RSI settles on a constant, so the 14-sample
-    // min/max window has zero width and every threshold lands on the RSI itself. What each side
-    // answers is then decided by whether its last bit puts the current sample at the top or the
-    // bottom of a band that has no width -- decimal noise on the platform (~1e-27), double noise
-    // here (~1e-14). Both produce an arbitrary walk of 0 / 50 / 100 on a market that is standing
-    // still. A dead band would make this port self-consistent but still would not reproduce the
-    // platform's coin flips, so there is nothing to match.
-    'DynamicZonesRSI@spike': 'degenerate zone (max === min) where both sides classify their own rounding noise',
-};
-
-// Indicators the platform runs but this port has no calc for. Same exact-set rule as the other
-// parity file: a new StockSharp indicator lands here as a FAILURE, not as a line in a log.
-const NO_JS_CALC = {
-    CandlePatternIndicator: 'pattern recognition, not a numeric series — no chart line to draw',
-};
-
-// Not comparable bar-for-bar at all, for a structural reason rather than an unfixed bug. Same
-// exact-set rule: an entry that stops applying fails, so this cannot quietly become a dumping
-// ground.
-const NOT_COMPARABLE = {
-    VolumeProfileIndicator: 'a histogram over price levels, not a series — the C# GetValue is null and the JS calc returns buckets keyed by price',
-};
+// Relative + absolute tolerance for decimal (C#) vs double (JS).
+// Decimal on the platform, double here, so the two cannot agree to the last bit. This is the size
+// of that gap and nothing more: across every comparison in this suite the largest honest
+// difference measured is ~1.4e-11, so 1e-9 leaves two orders of magnitude of headroom while
+// refusing an arithmetic mistake. It used to be 1e-6, which on a price of 100 accepted an error of
+// 1e-4 -- five orders of magnitude of cover for a real bug.
+const TOL = 1e-9;
 
 function assertAllowList(observed, allowed, what) {
     const unexpected = observed.filter((k) => !(k in allowed));
@@ -105,9 +80,9 @@ const lineMatch = (a, b) => a.length === b.length && b.every((v, i) => close(a[i
 
 // Compare one C# result (scalar values or per-line arrays) against what the calc produces for the
 // same candles and parameters. Returns null when they agree, or a short human-readable reason.
-function compare(fn, candles, params, cs) {
+function compare(kind, candles, params, cs) {
     let jsOut;
-    try { jsOut = fn(candles, params); }
+    try { jsOut = runtimeSeries(kind, candles, params); }
     catch (error) { return `threw: ${error && error.message}`; }
 
     if (Array.isArray(cs.values)) {
@@ -139,12 +114,40 @@ function compare(fn, candles, params, cs) {
     return unmatched.length === 0 ? null : `unmatched line(s): ${unmatched.join(', ')}`;
 }
 
+/// The parameters a variant asks for: the indicator's defaults with one setting moved. The C# name
+/// is PascalCase and the client calcs read either all-lower or camelCase, so both spellings are
+/// set -- the same rule the default parameters already go through.
+function variantParams(cs, variant) {
+    const params = { ...toJsParams(cs.params) };
+    const name = variant.param;
+    params[name.toLowerCase()] = variant.value;
+    params[name.charAt(0).toLowerCase() + name.slice(1)] = variant.value;
+    return params;
+}
+
+/// How a variant reads in a failure message: `Length=6`, `Inverted=true`.
+function variantLabel(variant) {
+    return `${variant.param}=${variant.value}`;
+}
+
+/// Whether the platform itself answered differently at this setting than at its default. Without
+/// that there is nothing to expect from the port either.
+function csMoved(cs, variant) {
+    if (Array.isArray(cs.values) && Array.isArray(variant.values)) {
+        return JSON.stringify(cs.values) !== JSON.stringify(variant.values);
+    }
+    if (Array.isArray(cs.lines) && Array.isArray(variant.lines)) {
+        return JSON.stringify(cs.lines) !== JSON.stringify(variant.lines);
+    }
+    return false;
+}
+
 const status = loadDumpStatus();
 const available = status.available;
 
 describe('parity scan: parameter matrix', () => {
-    it('every indicator that owns a Length matches StockSharp at 1, 2, 3, 6 and 21', (t) => {
-        if (!available) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+    it('every indicator matches StockSharp with each of its parameters moved', (t) => {
+        requireDump(status);
 
         const dump = readDump('values.json');
         const candles = dump.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
@@ -155,54 +158,109 @@ describe('parity scan: parameter matrix', () => {
 
         for (const cs of dump.indicators || []) {
             if (!Array.isArray(cs.variants) || cs.variants.length === 0) continue;
-            const fn = getCalcFn(cs.kind);
-            if (!fn) continue; // the default pass already asserts the no-calc allow-list
+            if (!getIndicatorDefinition(cs.kind)) continue;
             covered += 1;
+
+            // What the port draws at the indicator's own defaults, to tell "we disagree about this
+            // setting" from "we never read this setting". A calc that ignores a parameter name it
+            // does not know would otherwise compare its default output to the platform's default
+            // output and pass, and the whole sweep over that parameter would be a green nothing.
+            let baseline;
+            try { baseline = JSON.stringify(jsLines(runtimeSeries(cs.kind, candles, toJsParams(cs.params)))); }
+            catch { baseline = null; }
 
             for (const variant of cs.variants) {
                 compared += 1;
-                const params = { ...toJsParams(cs.params), length: variant.length };
-                const reason = compare(fn, candles, params, variant);
-                if (reason) diverged.push(`${cs.kind}@${variant.length}  ${reason}`);
+                const params = variantParams(cs, variant);
+
+                // The platform refused this setting. The port has to refuse it too, or it is
+                // drawing a line the terminal does not have -- and a refusal on our side is the
+                // agreement, so it is caught here rather than ending the whole scan.
+                if (variant.threw) {
+                    let produced = 0;
+                    try {
+                        produced = jsLines(runtimeSeries(cs.kind, candles, params))
+                            .reduce((n, line) => n + line.filter(numeric).length, 0);
+                    } catch { continue; }
+                    if (produced > 0) {
+                        diverged.push(`${cs.kind} ${variantLabel(variant)}  the platform refused `
+                            + `(${variant.threw}) but the port produced ${produced} values`);
+                    }
+                    continue;
+                }
+
+                let reason;
+                // A throw where the platform produced a series is a divergence like any other, and
+                // must not take the rest of the scan down with it.
+                try { reason = compare(cs.kind, candles, params, variant); }
+                catch (error) { reason = `threw: ${error.message}`; }
+
+                // The platform moved and the port did not: it is not reading this parameter at all,
+                // which no value comparison can show because both sides are then compared at their
+                // own defaults.
+                if (!reason && baseline !== null && csMoved(cs, variant)) {
+                    let now;
+                    try { now = JSON.stringify(jsLines(runtimeSeries(cs.kind, candles, params))); }
+                    catch { now = null; }
+                    if (now === baseline) {
+                        reason = 'the platform answers differently at this setting and the port does not read it';
+                    }
+                }
+
+                if (reason) diverged.push(`${cs.kind} ${variantLabel(variant)}  ${reason}`);
             }
         }
 
         console.log(`[parity-scan] matrix: ${covered} indicators, ${compared} runs, ${diverged.length} diverging`);
         assert.ok(compared > 300, `the matrix compared only ${compared} runs — the dump lost its variants`);
-        assertAllowList(diverged.map((d) => d.split('  ')[0]), MATRIX_DIVERGENCES, 'parameter-matrix divergences');
-        assert.equal(diverged.length, Object.keys(MATRIX_DIVERGENCES).length,
-            'divergences at non-default lengths:\n' + diverged.join('\n'));
+        assert.equal(diverged.length, 0,
+            `${diverged.length} divergences at non-default lengths:\n` + diverged.join('\n'));
     });
 });
 
 describe('parity scan: candle shapes', () => {
     it('every indicator matches StockSharp on constant, gapped, spiked and degenerate series', (t) => {
-        if (!available) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+        requireDump(status);
 
         const stress = readDump('stress.json');
         const diverged = [];
         const noFn = new Set();
-        const skipped = new Set();
         let compared = 0;
 
         for (const series of stress.series || []) {
             const candles = series.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
             for (const cs of series.indicators || []) {
-                if (cs.kind in NOT_COMPARABLE) { skipped.add(cs.kind); continue; }
-                const fn = getCalcFn(cs.kind);
-                if (!fn) { noFn.add(cs.kind); continue; }
+                // "We never implemented it" is asked first: it is the more actionable of the two.
+                if (!getIndicatorDefinition(cs.kind)) { noFn.add(cs.kind); continue; }
+
+                // A platform side that is null on every bar is not a reason to hold anything back:
+                // it is a comparison, and the port has to be silent there too. Nothing is excused
+                // from the stress pass any more -- the old exclusion was one indicator by name.
+
+                // The platform refused to compute this pair. The dumper used to drop such pairs
+                // entirely, which meant the port could happily produce a line where StockSharp
+                // produces nothing and no test ever looked. Refusing too is the only match.
+                if (cs.threw) {
+                    compared += 1;
+                    const produced = jsLines(runtimeSeries(cs.kind, candles, toJsParams(cs.params)))
+                        .reduce((n, line) => n + line.filter(numeric).length, 0);
+                    if (produced > 0) {
+                        diverged.push(`${cs.kind}@${series.name}  the platform refused (${cs.threw}) `
+                            + `but the port produced ${produced} values`);
+                    }
+                    continue;
+                }
+
                 compared += 1;
-                const reason = compare(fn, candles, toJsParams(cs.params), cs);
+                const reason = compare(cs.kind, candles, toJsParams(cs.params), cs);
                 if (reason) diverged.push(`${cs.kind}@${series.name}  ${reason}`);
             }
         }
 
         console.log(`[parity-scan] shapes: ${stress.series.length} series, ${compared} runs, ${diverged.length} diverging`);
         assert.ok(compared > 800, `the stress pass compared only ${compared} runs — the dump is short`);
-        assertAllowList([...noFn], NO_JS_CALC, 'stress indicators with no JS calc fn');
-        assertAllowList([...skipped], NOT_COMPARABLE, 'stress indicators held back from comparison');
-        assertAllowList(diverged.map((d) => d.split('  ')[0]), STRESS_DIVERGENCES, 'candle-shape divergences');
-        assert.equal(diverged.length, Object.keys(STRESS_DIVERGENCES).length,
-            'divergences on awkward candle shapes:\n' + diverged.join('\n'));
+        assertRecorded('stress-no-js-calc', [...noFn], 'stress indicators with no JS calc fn');
+        assert.equal(diverged.length, 0,
+            `${diverged.length} divergences on awkward candle shapes:\n` + diverged.join('\n'));
     });
 });

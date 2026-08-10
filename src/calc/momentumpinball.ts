@@ -1,63 +1,128 @@
-// Momentum Pinball (Algo.Indicators/MomentumPinball.cs).
-//
-// On a buffer of the last `length` close prices (capacity = Length, default
-// 14, with running Min/Max stats):
-//   momentum = price - buffer[0]
-//   range    = bufferMax - bufferMin
-//   result   = range != 0 ? momentum / range * 100 : 0
-//
-// Output is null until the buffer is full (Buffer.Count >= Length), then
-// buffer[0] is the price `Length - 1` bars ago.
-//
-// Deviation vs .cs: none in steady state. Non-final intra-candle handling
-// is not modelled (we treat every input as final).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    RollingMaximum,
+    RollingMinimum,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedPeriod,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class MomentumPinballProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RingBufferCheckpoint<number>
+> {
+    private readonly values: RingBuffer<number>;
+    private readonly minimum: RollingMinimum;
+    private readonly maximum: RollingMaximum;
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcMomentumPinball(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    if (length <= 0) {
-        for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-        return out;
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedPeriod(length, length, 'length');
+        this.values = new RingBuffer(length);
+        this.minimum = new RollingMinimum(length);
+        this.maximum = new RollingMaximum(length);
     }
 
-    const buf: number[] = []; // bounded to `length`
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const price = finite(input.value?.close);
+        if (price === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
 
-    for (let i = 0; i < n; i++) {
-        const price = candles[i] && candles[i].close;
-        if (typeof price !== 'number' || !Number.isFinite(price)) {
-            out[i] = { time: candles[i].time, value: null };
-            continue;
+        const minimum = commit ? this.minimum.push(price) : this.minimum.preview(price);
+        const maximum = commit ? this.maximum.push(price) : this.maximum.preview(price);
+        const nextSize = Math.min(this.length, this.values.size + 1);
+        let oldest: number | null = null;
+        if (nextSize === this.length) {
+            oldest = this.values.full
+                ? (this.length === 1 ? price : (this.values.at(1) as number))
+                : (this.values.front() ?? price);
         }
-        buf.push(price);
-        if (buf.length > length) buf.shift();
-        if (buf.length < length) {
-            out[i] = { time: candles[i].time, value: null };
-            continue;
+        if (commit) this.values.push(price);
+
+        let value: number | null = null;
+        if (minimum !== null && maximum !== null && oldest !== null) {
+            const range = maximum - minimum;
+            value = range === 0 ? 0 : finite((price - oldest) / range * 100);
         }
-        // Compute min/max over the buffer. O(length) per bar — fine for our
-        // batch-recompute sizes; the .cs has incremental stats but the
-        // numeric result is identical.
-        let mn = buf[0];
-        let mx = buf[0];
-        for (let j = 1; j < buf.length; j++) {
-            const v = buf[j];
-            if (v < mn) mn = v;
-            if (v > mx) mx = v;
-        }
-        const momentum = price - buf[0];
-        const range = mx - mn;
-        const value = range !== 0 ? (momentum / range) * 100 : 0;
-        out[i] = { time: candles[i].time, value };
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
+
+    protected resetState(): void {
+        this.values.clear();
+        this.minimum.reset();
+        this.maximum.reset();
+    }
+
+    protected captureState(): RingBufferCheckpoint<number> {
+        return this.values.checkpoint();
+    }
+
+    protected restoreState(state: RingBufferCheckpoint<number>): void {
+        const values = state?.values;
+        if (!Array.isArray(values) || values.length > this.length
+            || values.some((value) => finite(value) === null)) {
+            throw new TypeError('sschart: invalid Momentum Pinball checkpoint');
+        }
+        this.resetState();
+        for (const value of values) {
+            this.values.push(value);
+            this.minimum.push(value);
+            this.maximum.push(value);
+        }
+    }
 }
+
+export const MomentumPinballIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'MomentumPinball',
+    name: 'Momentum Pinball',
+    description: 'Close displacement from the oldest price, normalized by the rolling range.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14)],
+    outputs: [{
+        id: 'line', name: 'Momentum Pinball',
+        defaultStyle: lineStyle('#ff7043'),
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['momentumpinball'],
+    scaleRange: { min: -100, max: 100 },
+    levels: [0],
+    processorFactory: (parameters) => new MomentumPinballProcessor(
+        resolvedPeriod(parameters?.length, 14, 'length'),
+    ),
+});

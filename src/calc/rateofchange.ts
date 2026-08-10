@@ -1,29 +1,61 @@
-// Rate of Change — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\RateOfChange.cs.
-// Inherits from Momentum: momentum[i] = close[i] - close[i-Length].
-// ROC[i]      = momentum[i] / close[i-Length] * 100,
-// emitted only when Length+1 closes are available AND close[i-Length] != 0.
-// Deviations from .cs: none — formula is straight 1:1.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    BufferedPriceProcessor,
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export class RateOfChangeProcessor extends BufferedPriceProcessor {
+    constructor(length: number) { super(length, 'line'); }
 
-export function calcRateOfChange(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 12;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    for (let i = length; i < n; i++) {
-        const curr = candles[i] && candles[i].close;
-        const past = candles[i - length] && candles[i - length].close;
-        if (typeof curr !== 'number' || !Number.isFinite(curr) ||
-            typeof past !== 'number' || !Number.isFinite(past) || past === 0) {
-            continue;
-        }
-        out[i] = { time: candles[i].time, value: (curr - past) / past * 100 };
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const past = this.past();
+        const value = close !== null && typeof past === 'number' && past !== 0
+            ? (close - past) / past * 100
+            : null;
+        if (commit) this.prices.push(close);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
 }
+
+export const RateOfChangeIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'RateOfChange',
+    name: 'Rate of Change',
+    description: 'Percentage change from the close N bars ago.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(5)],
+    outputs: [{ id: 'line', name: 'ROC', defaultStyle: lineStyle('#26c6da') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['roc', 'rateofchange'],
+    levels: [0],
+    processorFactory: (parameters) => new RateOfChangeProcessor(resolvedLength(parameters, 12)),
+});

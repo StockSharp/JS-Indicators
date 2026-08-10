@@ -1,108 +1,149 @@
-// Ultimate Oscillator — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\UltimateOscillator.cs.
-// Deviations from .cs: none. Periods 7/14/28 fixed (matches .cs constants).
-//
-// Per bar (after first close is captured as prev):
-//   BP = close - min(low, prevClose)
-//   TR = max(high, prevClose) - min(low, prevClose)
-//   bpSum7, bpSum14, bpSum28 = rolling Σ BP over those windows
-//   trSum7, trSum14, trSum28 = rolling Σ TR over those windows
-//   avg7  = bpSum7 / trSum7    (all 3 ratios)
-//   UO    = 100 * (4*avg7 + 2*avg14 + 1*avg28) / 7
-// Formed once the 28-period sum has filled (so first non-null UO lands at
-// index 28 — 1 bar to capture prevClose + 28 bars of windowed sums).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingSum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    lineStyle,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-/**
- * @returns {IndicatorPoint[]}
- */
-export function calcUltimateOscillator(candles: CandlePoint[], _params?: IndicatorParams) {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    const PERIOD7 = 7, PERIOD14 = 14, PERIOD28 = 28;
-    const W4 = 4, W2 = 2, W1 = 1;
-
-    // We compute BP/TR per bar starting at i=1, then maintain rolling sums.
-    const bp = new Array(n);
-    const tr = new Array(n);
-    for (let i = 0; i < n; i++) { bp[i] = null; tr[i] = null; }
-
-    let prevClose: number | null = null;
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        const cl = c && c.close;
-        const ok = typeof h === 'number' && Number.isFinite(h)
-            && typeof l === 'number' && Number.isFinite(l)
-            && typeof cl === 'number' && Number.isFinite(cl);
-        if (!ok) {
-            // Don't advance prevClose; emit null at this bar (already null).
-            continue;
-        }
-        if (prevClose !== null) {
-            const min = l < prevClose ? l : prevClose;
-            const max = h > prevClose ? h : prevClose;
-            bp[i] = cl - min;
-            tr[i] = max - min;
-        }
-        prevClose = cl;
-    }
-
-    // Rolling sums of bp/tr over the three windows. Sum is "ready" only when
-    // we have `period` consecutive valid (non-null) bp values.
-    function rollingSum(values: (number | null)[], period: number) {
-        const sums = new Array(n);
-        for (let i = 0; i < n; i++) sums[i] = null;
-        let sum = 0, valid = 0;
-        const win = new Array(period);
-        let head = 0; // circular index
-        // We treat null as "invalid sample" and reset window when one is hit.
-        // Simpler approach: count consecutive valid trailing samples.
-        let consec = 0;
-        for (let i = 0; i < n; i++) {
-            const v = values[i];
-            if (v === null) {
-                consec = 0;
-                sum = 0;
-                continue;
-            }
-            // Add current; if window already full, evict oldest.
-            sum += v;
-            consec++;
-            if (consec > period) {
-                // evict bar at i - period — non-null because `consec` counted
-                // that many consecutive non-null samples ending at i
-                sum -= values[i - period]!;
-                consec = period;
-            }
-            if (consec === period) sums[i] = sum;
-        }
-        return sums;
-    }
-
-    const bp7  = rollingSum(bp, PERIOD7);
-    const bp14 = rollingSum(bp, PERIOD14);
-    const bp28 = rollingSum(bp, PERIOD28);
-    const tr7  = rollingSum(tr, PERIOD7);
-    const tr14 = rollingSum(tr, PERIOD14);
-    const tr28 = rollingSum(tr, PERIOD28);
-
-    for (let i = 0; i < n; i++) {
-        const b7 = bp7[i], b14 = bp14[i], b28 = bp28[i];
-        const t7 = tr7[i], t14 = tr14[i], t28 = tr28[i];
-        if (b7 === null || b14 === null || b28 === null
-            || t7 === null || t14 === null || t28 === null) continue;
-        if (t7 === 0 || t14 === 0 || t28 === 0) continue;
-        const a7 = b7 / t7;
-        const a14 = b14 / t14;
-        const a28 = b28 / t28;
-        const uo = 100 * (W4 * a7 + W2 * a14 + W1 * a28) / (W4 + W2 + W1);
-        out[i] = { time: candles[i].time, value: uo };
-    }
-
-    return out;
+export interface UltimateOscillatorCheckpoint {
+    readonly previousClose: number | null;
+    readonly buyingPressure: readonly RollingWindowCheckpoint[];
+    readonly trueRange: readonly RollingWindowCheckpoint[];
 }
+
+export const ULTIMATE_OSCILLATOR_PERIODS = Object.freeze([7, 14, 28]);
+
+export const ULTIMATE_OSCILLATOR_WEIGHTS = Object.freeze([4, 2, 1]);
+
+export class UltimateOscillatorProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    UltimateOscillatorCheckpoint
+> {
+    private previousClose: number | null = null;
+    private readonly buyingPressure = ULTIMATE_OSCILLATOR_PERIODS.map(
+        (period) => new RollingSum(period),
+    );
+    private readonly trueRange = ULTIMATE_OSCILLATOR_PERIODS.map(
+        (period) => new RollingSum(period),
+    );
+
+    constructor() { super(['line']); }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        const valid = high !== null && low !== null && close !== null;
+        const minimum = valid && this.previousClose !== null
+            ? Math.min(low, this.previousClose)
+            : null;
+        const maximum = valid && this.previousClose !== null
+            ? Math.max(high, this.previousClose)
+            : null;
+        const buyingPressure = minimum === null ? null : close! - minimum;
+        const trueRange = minimum === null || maximum === null ? null : maximum - minimum;
+        const buyingPressureSums = this.buyingPressure.map((sum) => (
+            commit ? sum.push(buyingPressure) : sum.preview(buyingPressure)
+        ));
+        const trueRangeSums = this.trueRange.map((sum) => (
+            commit ? sum.push(trueRange) : sum.preview(trueRange)
+        ));
+        if (commit && valid) this.previousClose = close;
+
+        const formed = buyingPressureSums.every((value) => value !== null)
+            && trueRangeSums.every((value) => value !== null);
+        let value: number | null = null;
+        if (formed && trueRangeSums.every((sum) => sum !== 0)) {
+            const weighted = ULTIMATE_OSCILLATOR_WEIGHTS.reduce((total, weight, index) => (
+                total + weight * buyingPressureSums[index]! / trueRangeSums[index]!
+            ), 0);
+            value = finite(100 * weighted / 7);
+        }
+        return {
+            isFormed: formed,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.previousClose = null;
+        this.buyingPressure.forEach((sum) => sum.reset());
+        this.trueRange.forEach((sum) => sum.reset());
+    }
+
+    protected captureState(): UltimateOscillatorCheckpoint {
+        return Object.freeze({
+            previousClose: this.previousClose,
+            buyingPressure: Object.freeze(this.buyingPressure.map((sum) => sum.checkpoint())),
+            trueRange: Object.freeze(this.trueRange.map((sum) => sum.checkpoint())),
+        });
+    }
+
+    protected restoreState(state: UltimateOscillatorCheckpoint): void {
+        const validWindows = (windows: readonly RollingWindowCheckpoint[]) => (
+            Array.isArray(windows)
+            && windows.length === ULTIMATE_OSCILLATOR_PERIODS.length
+            && windows.every((window, index) => (
+                window !== null
+                && typeof window === 'object'
+                && Array.isArray(window.values)
+                && window.values.length <= ULTIMATE_OSCILLATOR_PERIODS[index]
+                && window.values.every((value: number | null) => (
+                    value === null || finite(value) !== null
+                ))
+            ))
+        );
+        if (state === null || typeof state !== 'object'
+            || (state.previousClose !== null && finite(state.previousClose) === null)
+            || !validWindows(state.buyingPressure) || !validWindows(state.trueRange)
+            || state.buyingPressure.some((window, index) => (
+                window.values.length !== state.trueRange[index].values.length
+            ))) {
+            throw new TypeError('sschart: invalid Ultimate Oscillator checkpoint');
+        }
+        this.buyingPressure.forEach((sum, index) => sum.restore(state.buyingPressure[index]));
+        this.trueRange.forEach((sum, index) => sum.restore(state.trueRange[index]));
+        this.previousClose = state.previousClose;
+    }
+}
+
+export const UltimateOscillatorIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'UltimateOscillator',
+    name: 'Ultimate Oscillator',
+    description: 'Weighted buying-pressure oscillator over fixed 7, 14 and 28 bar windows.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{ id: 'line', name: 'Ultimate Oscillator', defaultStyle: lineStyle('#42a5f5') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['uo', 'ultimateoscillator'],
+    scaleRange: { min: 0, max: 100 },
+    levels: [30, 70],
+    processorFactory: () => new UltimateOscillatorProcessor(),
+});

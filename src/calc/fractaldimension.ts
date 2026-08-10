@@ -1,101 +1,147 @@
-// Fractal Dimension Index (FDI).
-// Port of StockSharp Algo.Indicators FractalDimension.cs.
-//
-// For each final bar:
-//   1. Push close into a length-bounded circular buffer (capacity = length).
-//   2. If buffer.count < 2, emit 1.5 (the .cs neutral mid-value).
-//   3. Else compute:
-//        maxHigh    = max(buffer)
-//        minLow     = min(buffer)
-//        pathLength = Σ |buffer[i] - buffer[i-1]|   for i = 1..count-1
-//        range      = maxHigh - minLow
-//        if pathLength == 0 OR range == 0:
-//          fd = 1.5
-//        else:
-//          logDen = log(2 * (length - 1))
-//          if logDen == 0: fd = 1.5            // length == 1 / 1.5 etc.
-//          else:           fd = 1 + (log(pathLength) - log(range)) / logDen
-//   4. Clamp fd into [1.0, 2.0].
-//
-// .cs deviation notes:
-// (a) Source: the .cs reads `input.GetValue<decimal>()`, which for a
-//     plain non-candle input would be the price scalar; for our candle
-//     input pipeline this resolves to the candle close (default Source).
-//     We use close.
-// (b) Warm-up: the .cs emits 1.5 starting at the very FIRST bar (when
-//     buffer.Count == 1, it falls through the `count < 2` early return).
-//     We mirror this — the first output is 1.5, NOT null. This matches
-//     the .cs behaviour bit-for-bit.
-// (c) `IsFinal=false` (intra-bar) branch from the .cs is ignored: this
-//     calculator only processes a homogenous batch of closed bars.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    RollingMaximum,
+    RollingMinimum,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    RecursiveLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/recursive-statistical.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-export function calcFractalDimension(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 30;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    // Sliding window of the last `length` finite closes. Stored as a plain
-    // array; we keep it bounded by shifting from the front when it grows
-    // beyond `length`, mirroring DecimalBuffer.Capacity behaviour.
-    const buffer: number[] = [];
-    let logDen: number | null = null;
-    if (length > 1) {
-        const d = 2 * (length - 1);
-        logDen = d > 0 ? Math.log(d) : null;
-    }
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i] && candles[i].close;
-        if (typeof c !== 'number' || !Number.isFinite(c)) {
-            // Bad input bar: hold the buffer, emit null. (Matches "no
-            // PushBack happened, no usable value" intuition.)
-            continue;
-        }
-
-        buffer.push(c);
-        if (buffer.length > length) buffer.shift();
-
-        // Not formed until the buffer holds `length` closes (DecimalLengthIndicator
-        // IsFormed = Buffer.Count == Length) — null the warm-up to match StockSharp.
-        if (buffer.length < length) continue;
-
-        if (buffer.length < 2) {
-            out[i] = { time: candles[i].time, value: 1.5 };
-            continue;
-        }
-
-        let maxHigh = buffer[0];
-        let minLow = buffer[0];
-        let pathLength = 0;
-        for (let k = 1; k < buffer.length; k++) {
-            const prev = buffer[k - 1];
-            const curr = buffer[k];
-            if (curr > maxHigh) maxHigh = curr;
-            if (curr < minLow) minLow = curr;
-            pathLength += Math.abs(curr - prev);
-        }
-
-        let fd;
-        const range = maxHigh - minLow;
-        if (pathLength === 0 || range === 0 || logDen === null) {
-            fd = 1.5;
-        } else {
-            fd = 1 + (Math.log(pathLength) - Math.log(range)) / logDen;
-        }
-
-        // Clamp into [1, 2].
-        if (fd < 1) fd = 1;
-        else if (fd > 2) fd = 2;
-
-        out[i] = { time: candles[i].time, value: fd };
-    }
-    return out;
+export interface FractalDimensionCheckpoint {
+    readonly values: RingBufferCheckpoint<number>;
 }
+
+export class FractalDimensionProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    FractalDimensionCheckpoint
+> {
+    private readonly values: RingBuffer<number>;
+    private readonly maximum: RollingMaximum;
+    private readonly minimum: RollingMinimum;
+    private readonly logDenominator: number | null;
+    private pathLength = 0;
+
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedLength({ length }, length, 1, 500);
+        this.values = new RingBuffer<number>(length);
+        this.maximum = new RollingMaximum(length);
+        this.minimum = new RollingMinimum(length);
+        this.logDenominator = length > 1 ? Math.log(2 * (length - 1)) : null;
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        if (close === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const pathLength = this.projectPath(close);
+        const maximum = commit ? this.maximum.push(close) : this.maximum.preview(close);
+        const minimum = commit ? this.minimum.push(close) : this.minimum.preview(close);
+        if (commit) {
+            this.values.push(close);
+            this.pathLength = pathLength;
+        }
+
+        let value: number | null = null;
+        if (maximum !== null && minimum !== null) {
+            const range = maximum - minimum;
+            let dimension = pathLength === 0 || range === 0 || this.logDenominator === null
+                ? 1.5
+                : 1 + (Math.log(pathLength) - Math.log(range)) / this.logDenominator;
+            dimension = Math.max(1, Math.min(2, dimension));
+            value = finite(dimension);
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.values.clear();
+        this.maximum.reset();
+        this.minimum.reset();
+        this.pathLength = 0;
+    }
+
+    protected captureState(): FractalDimensionCheckpoint {
+        return Object.freeze({ values: this.values.checkpoint() });
+    }
+
+    protected restoreState(state: FractalDimensionCheckpoint): void {
+        const values = state?.values?.values;
+        if (!Array.isArray(values) || values.length > this.length
+            || values.some((value) => finite(value) === null)) {
+            throw new TypeError('sschart: invalid Fractal Dimension checkpoint');
+        }
+        this.resetState();
+        for (const value of values) this.append(value);
+    }
+
+    private projectPath(value: number): number {
+        if (this.values.size === 0 || this.length === 1) return 0;
+        let path = this.pathLength + Math.abs(value - this.values.back()!);
+        if (this.values.full) {
+            path -= Math.abs(this.values.at(1)! - this.values.front()!);
+        }
+        return Math.max(0, path);
+    }
+
+    private append(value: number): void {
+        this.pathLength = this.projectPath(value);
+        this.maximum.push(value);
+        this.minimum.push(value);
+        this.values.push(value);
+    }
+}
+
+export const FractalDimensionIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    RecursiveLengthParameters
+> = registerIndicator({
+    id: 'FractalDimension',
+    name: 'Fractal Dimension',
+    description: 'Clamped fractal dimension of the rolling close-price path.',
+    category: IndicatorCategory.Statistical,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(30, 1, 500)],
+    outputs: [{ id: 'line', name: 'Fractal Dimension', defaultStyle: lineStyle('#7e57c2') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['fractaldimension'],
+    scaleRange: { min: 1, max: 2 },
+    levels: [1.5],
+    processorFactory: (parameters) => new FractalDimensionProcessor(
+        resolvedLength(parameters, 30, 1, 500),
+    ),
+});

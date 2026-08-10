@@ -1,33 +1,76 @@
-// Shift indicator — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\Shift.cs.
-//
-// .cs only delays the FIRST emitted value by `Length` bars; once formed it
-// returns the current close (not a shifted-back close). Implementation
-// matches: first `length` outputs are null, subsequent outputs are
-// close[i] verbatim. Default Length = 1.
-// Deviations from .cs: none — .cs really just gates output by counting down
-// `_left` and emits the current input once `_left <= 0`.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    PRICE_LINE_STYLE,
+} from './shared/cumulative-price.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export interface ShiftParameters extends IndicatorParameters {
+    readonly length: number;
+}
 
-export function calcShift(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 1;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const t = c && c.time;
-        if (i < length) {
-            out[i] = { time: t, value: null };
-            continue;
+/** StockSharp Shift is a warm-up gate; it does not relocate output points. */
+export class ShiftProcessor extends SequentialIndicatorProcessor<IndicatorCandle, null> {
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500) {
+            throw new RangeError(
+                'sschart: Shift length must be an integer from 1 to 500',
+            );
         }
-        const v = c && c.close;
-        out[i] = {
-            time: t,
-            value: typeof v === 'number' && Number.isFinite(v) ? v : null,
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        _commit: boolean,
+    ): IndicatorCalculationResult {
+        const value = input.index < this.length ? null : finite(input.value?.close);
+        return {
+            isFormed: input.index >= this.length,
+            values: [this.output('line', value, input.index)],
         };
     }
-    return out;
+
+    protected resetState(): void { /* position is owned by the sequential base */ }
+    protected captureState(): null { return null; }
+    protected restoreState(state: null): void {
+        if (state !== null) throw new TypeError('sschart: invalid Shift checkpoint');
+    }
 }
+
+export const ShiftIndicator: IndicatorDefinition<IndicatorCandle, ShiftParameters>
+    = registerIndicator({
+        id: 'Shift',
+        name: 'Shift',
+        description: 'Passes through the current close after a fixed warm-up count.',
+        category: IndicatorCategory.Price,
+        input: CandlestickIndicatorInput,
+        parameters: [{
+            id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+            defaultValue: 1, min: 1, max: 500, step: 1,
+        }],
+        outputs: [{ id: 'line', name: 'Shift', defaultStyle: PRICE_LINE_STYLE }],
+        naturalPane: IndicatorPane.Overlay,
+        measure: IndicatorMeasure.Price,
+
+        aliases: ['shift'],
+        processorFactory: (parameters) => new ShiftProcessor(
+            parameters?.length === undefined ? 1 : parameters.length,
+        ),
+    });

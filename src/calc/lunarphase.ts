@@ -1,75 +1,69 @@
-import { lunarPhaseFromMilliseconds } from '../math/lunar-phase.js';
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    lunarPhaseFromMilliseconds,
+} from '../math/index.js';
 
-// Lunar Phase indicator (Algo.Indicators/LunarPhase.cs).
-// Emits an integer 0..7 per candle, derived from the candle's timestamp.
-// No parameters.
-//
-// Phase numbering (Ecng.Common.LunarPhases enum):
-//   0 = NewMoon
-//   1 = WaxingCrescent
-//   2 = FirstQuarter
-//   3 = WaxingGibbous
-//   4 = FullMoon
-//   5 = WaningGibbous
-//   6 = LastQuarter
-//   7 = WaningCrescent
-//
-// Algorithm (Ecng.Common.TimeHelper.GetLunarPhase):
-//   julianDate    = date.ToOADate() + 2415018.5
-//   daysSinceNew  = julianDate - 2451549.5         // Jan 6, 2000 12:00
-//   newMoons      = daysSinceNew / 29.53           // synodic month, days
-//   phase         = newMoons - floor(newMoons)     // 0..1
-//   phaseIndex    = floor(phase * 8)               // 0..7
-//
-// .cs DateTime.ToOADate() returns days since 1899-12-30 (treating the value
-// as local time; for UTC DateTimeOffset values this is the same numeric).
-// In JS we substitute: julian = (utcMs - Date.UTC(1899,11,30)) / 86_400_000 + 2415018.5.
-//
-// Deviation note vs .cs: none in the math. We do treat each candle.time as
-// UTC ISO/ms; the .cs uses input.Time which is the candle's open time as
-// stored by the framework. For minute/hour timeframes this rounds to the
-// nearest 8-way bucket the same way the .cs does — we mirror the
-// simplified 29.53-day cycle exactly, so Ecng's own ±1-phase tolerance
-// note applies here too.
+export class LunarPhaseProcessor extends SequentialIndicatorProcessor<IndicatorCandle, null> {
+    constructor() {
+        super(['line']);
+    }
 
-/**
- * Parse a candle.time value to a millisecond UTC timestamp. Accepts
- * numbers (ms or s — heuristic), Date instances, and ISO strings.
- * Returns NaN on unparseable input.
- */
-function timeToMs(t: string | number | Date): number {
-    if (t instanceof Date) return t.getTime();
-    if (typeof t === 'number') {
-        // Heuristic: seconds-since-epoch fits within ~10 digits for "modern"
-        // dates; milliseconds is ~13 digits. We pick a threshold around the
-        // year 2286 in seconds (1e10) which is comfortably out of normal range.
-        return t < 1e11 ? t * 1000 : t;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        _commit: boolean,
+    ): IndicatorCalculationResult {
+        const value = lunarPhaseFromMilliseconds(input.time * 1_000);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    if (typeof t === 'string') {
-        const ms = Date.parse(t);
-        return ms;
+
+    protected resetState(): void { /* stateless */ }
+
+    protected captureState(): null { return null; }
+
+    protected restoreState(state: null): void {
+        if (state !== null)
+            throw new TypeError('sschart: invalid Lunar Phase checkpoint');
     }
-    return NaN;
 }
 
-/** Compute the lunar phase 0..7 for a given UTC ms timestamp. */
-// Exported under a leading-underscore name to make it explicit that
-// callers outside the test suite shouldn't rely on it — calcLunarPhase
-// is the supported public surface.
-export function _lunarPhaseFromMs(ms: number): number | null {
-    return lunarPhaseFromMilliseconds(ms);
-}
+export const LunarPhaseIndicator: IndicatorDefinition<IndicatorCandle> = registerIndicator({
+    id: 'LunarPhase',
+    name: 'Lunar Phase',
+    description: 'Eight-part lunar cycle phase derived from each candle timestamp.',
+    category: IndicatorCategory.Cycle,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{
+        id: 'line',
+        name: 'Lunar Phase',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#7e57c2',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
 
-/** @param _params unused */
-export function calcLunarPhase(candles: CandlePoint[], _params?: IndicatorParams): IndicatorPoint[] {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const ms = timeToMs(candles[i] && candles[i].time);
-        const v = _lunarPhaseFromMs(ms);
-        out[i] = { time: candles[i].time, value: v };
-    }
-    return out;
-}
+    aliases: ['lunarphase'],
+    scaleRange: { min: 0, max: 7 },
+    processorFactory: () => new LunarPhaseProcessor(),
+});

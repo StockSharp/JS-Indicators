@@ -1,72 +1,86 @@
-// QStick — Tushar Chande's open-close momentum oscillator.
-// Port of StockSharp Algo.Indicators QStick.cs.
-//
-// Algorithm (per .cs):
-//   per bar: feed (OpenPrice - ClosePrice) into a SimpleMovingAverage.
-//   Default Length = 15.
-//
-// Note on SMA semantics: StockSharp's SimpleMovingAverage divides the running
-// buffer sum by Length even before the buffer is full (i.e. partial-window
-// averages from bar 0 onwards), NOT by the actual sample count. So the very
-// first output equals (open[0]-close[0]) / Length, the second equals
-// (sum of first two open-close diffs) / Length, etc. This matches the
-// reference IndicatorsData/QStick.txt file row-for-row. We replicate that
-// here instead of delegating to ./sma.js (which follows the more standard
-// "null until buffer full, then sum/length" pattern).
-//
-// Sign convention: it's (open - close), not (close - open). When close > open
-// (a green candle), value is negative; when close < open (a red candle),
-// value is positive. The .cs literally writes
-//   `_sma.Process(input, candle.OpenPrice - candle.ClosePrice)`.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+    resolvedPeriod,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export class QStickProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly average: SimpleMovingAverage;
 
-export function calcQStick(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) && params.length > 0
-        ? (params.length | 0)
-        : 15;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    // Pre-compute (open - close) for each bar so the loop can keep a running
-    // sum and pop the oldest element in O(1).
-    const diffs = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const o = c && c.open;
-        const cl = c && c.close;
-        if (typeof o === 'number' && Number.isFinite(o) &&
-            typeof cl === 'number' && Number.isFinite(cl)) {
-            diffs[i] = o - cl;
-        } else {
-            diffs[i] = null;
-        }
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedPeriod(length, length, 'length');
+        this.average = new SimpleMovingAverage(length);
     }
 
-    // Running sum over the last `length` valid diffs. Invalid (null) samples
-    // make the current window's output null until the bad point drops out.
-    let sum = 0;
-    let invalid = 0;
-    for (let i = 0; i < n; i++) {
-        const d = diffs[i];
-        if (d === null) invalid++;
-        else sum += d;
-
-        if (i >= length) {
-            const drop = diffs[i - length];
-            if (drop === null) invalid--;
-            else sum -= drop;
-        }
-
-        if (invalid > 0 || i < length - 1) {
-            // Not formed until `length` diffs are buffered (StockSharp SMA reports
-            // IsFormed only then), so null the warm-up.
-            out[i] = { time: candles[i].time, value: null };
-        } else {
-            // Divide by Length (not by actual count). Matches C# SMA semantics.
-            out[i] = { time: candles[i].time, value: sum / length };
-        }
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const open = finite(input.value?.open);
+        const close = finite(input.value?.close);
+        const difference = open === null || close === null ? null : open - close;
+        const value = commit
+            ? this.average.push(difference)
+            : this.average.preview(difference);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
+
+    protected resetState(): void { this.average.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.average.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || !Array.isArray(state.values) || state.values.length > this.length
+            || state.values.some((value) => value !== null && finite(value) === null)) {
+            throw new TypeError('sschart: invalid QStick checkpoint');
+        }
+        this.average.restore(state);
+    }
 }
+
+export const QStickIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'QStick',
+    name: 'Q Stick',
+    description: 'Simple moving average of the candle open-minus-close difference.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(15)],
+    outputs: [{ id: 'line', name: 'Q Stick', defaultStyle: lineStyle('#ec407a') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['qstick'],
+    levels: [0],
+    processorFactory: (parameters) => new QStickProcessor(resolvedLength(parameters, 15)),
+});

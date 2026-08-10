@@ -18,7 +18,7 @@
 // `npm test` with the captured output instead of being swallowed.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,28 +108,34 @@ if (existsSync(statusFile)) {
 
 // Exec the dll directly: no MSBuild involvement, so this step cannot contend with anything.
 function dump(args, outFile) {
-    let out;
-    try {
-        out = execFileSync('dotnet', [dll, ...args], {
-            encoding: 'utf8',
-            timeout: 300000,
-            maxBuffer: 64 * 1024 * 1024,
-        });
-    } catch (err) {
-        fail(`dumper run failed: dotnet ${dll} ${args.join(' ')}`,
-            [err.stdout, err.stderr].filter(Boolean).join('\n'));
-    }
-    try {
-        JSON.parse(out);
-    } catch (err) {
-        fail(`dumper output is not valid JSON: dotnet ${dll} ${args.join(' ')}`, `${err.message}\n${out.slice(0, 2000)}`);
-    }
     mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(join(cacheDir, outFile), out);
+    const target = join(cacheDir, outFile);
+    const handle = openSync(target, 'w');
+    try {
+        // Straight to a file rather than through a pipe. Sweeping a composite's inner lines took
+        // the dump past any buffer worth naming, and a buffer that is merely large is a limit
+        // waiting to be hit again by the next thing that widens coverage.
+        execFileSync('dotnet', [dll, ...args], { timeout: 900000, stdio: ['ignore', handle, 'pipe'] });
+    } catch (err) {
+        closeSync(handle);
+        fail(`dumper run failed: dotnet ${dll} ${args.join(' ')}`, err.stderr ? String(err.stderr) : '');
+    }
+    closeSync(handle);
+
+    // Parsed once here, so a truncated dump fails with the command that made it rather than as a
+    // puzzling error inside a test.
+    try {
+        JSON.parse(readFileSync(target, 'utf8'));
+    } catch (err) {
+        fail(`dumper output is not valid JSON: dotnet ${dll} ${args.join(' ')}`, err.message);
+    }
 }
 
 dump([], 'catalog.json');
-dump(['--values'], 'values.json');
+// The 1659 bars of real market data StockSharp pins its own reference files against. The dumper is
+// told where they are rather than looking: only this file knows which checkout is in play.
+const ohlcv = join(dirname(ssRef), '..', 'Tests', 'Resources', 'ohlcv.txt');
+dump(['--values', '--ohlcv', ohlcv], 'values.json');
 dump(['--stress'], 'stress.json');
 
 writeStatus({ available: true, stamp });

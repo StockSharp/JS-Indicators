@@ -1,98 +1,212 @@
-// True Strength Index (TSI) — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\TrueStrengthIndex.cs.
-// Deviations from .cs: none.
-//
-// momentum[i]   = close[i] - close[i-1]                         (null for i=0)
-// firstMom      = EMA(momentum,     firstLength)
-// firstAbsMom   = EMA(|momentum|,   firstLength)
-// dblMom        = EMA(firstMom,     secondLength)
-// dblAbsMom     = EMA(firstAbsMom,  secondLength)
-// tsi           = 100 * dblMom / dblAbsMom   (0 when dblAbsMom == 0)
-// signal        = EMA(tsi, signalLength)
-//
-// Defaults: firstLength=25, secondLength=13, signalLength=7 per .cs ctor.
-//
-// @typedef {{tsi: IndicatorPoint[], signal: IndicatorPoint[]}} TSISeries
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    PartialSeedExponentialMovingAverage,
+    type PartialSeedExponentialMovingAverageCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-/**
- * EMA matching the C# `ExponentialMovingAverage` partial-seed semantics:
- * emits `Buffer.Sum / Length` from bar 0 (the partial seed), at bar
- * length-1 the buffer fills and emission equals the classic SMA, from bar
- * length onward the steady-state recursion takes over. Delegated to the
- * shared partialSeedEMA helper.
- */
-import { partialSeedEMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-function emaArray(values: (number | null)[], length: number) {
-    return partialSeedEMA(values, length);
+export interface TrueStrengthIndexParameters extends IndicatorParameters {
+    readonly firstLength: number;
+    readonly secondLength: number;
+    readonly signalLength: number;
 }
 
-/**
- * @param {{firstLength?: number, secondLength?: number, signalLength?: number}} [params]
- * @returns {TSISeries}
- */
-export function calcTrueStrengthIndex(candles: CandlePoint[], params?: IndicatorParams) {
-    const firstLength  = params && Number.isFinite(params.firstLength)  ? (params.firstLength  | 0) : 25;
-    const secondLength = params && Number.isFinite(params.secondLength) ? (params.secondLength | 0) : 13;
-    const signalLength = params && Number.isFinite(params.signalLength) ? (params.signalLength | 0) : 7;
-
-    if (!Array.isArray(candles) || candles.length === 0) return { tsi: [], signal: [] };
-    const n = candles.length;
-
-    // Build momentum and |momentum| series.
-    const mom = new Array(n);
-    const absMom = new Array(n);
-    for (let i = 0; i < n; i++) {
-        if (i === 0) { mom[i] = null; absMom[i] = null; continue; }
-        const cur = candles[i] && candles[i].close;
-        const prv = candles[i - 1] && candles[i - 1].close;
-        const ok = typeof cur === 'number' && Number.isFinite(cur)
-            && typeof prv === 'number' && Number.isFinite(prv);
-        if (!ok) { mom[i] = null; absMom[i] = null; continue; }
-        const m = cur - prv;
-        mom[i] = m;
-        absMom[i] = Math.abs(m);
-    }
-
-    const firstMom    = emaArray(mom,    firstLength);
-    const firstAbsMom = emaArray(absMom, firstLength);
-    const dblMom      = emaArray(firstMom,    secondLength);
-    const dblAbsMom   = emaArray(firstAbsMom, secondLength);
-
-    const tsiRaw = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const a = dblMom[i];
-        const b = dblAbsMom[i];
-        if (a === null || b === null) { tsiRaw[i] = null; continue; }
-        tsiRaw[i] = b !== 0 ? 100 * a / b : 0;
-    }
-
-    // Signal is only fed tsi values after Line.IsFormed = true (per .cs:
-    // BaseComplexIndicator Sequence mode breaks before invoking the next
-    // inner when the previous is not yet formed). Line.IsFormed iff
-    // doubleSmoothed*.IsFormed, which happens once each inner EMA has
-    // received secondLength inputs. The first inner-EMA input lands at
-    // bar 1 (first momentum), so Line.IsFormed at bar secondLength.
-    const lineFormedAt = secondLength;
-    const tsiForSignal = new Array(n);
-    for (let i = 0; i < n; i++) {
-        tsiForSignal[i] = i >= lineFormedAt ? tsiRaw[i] : null;
-    }
-    const signalRaw = emaArray(tsiForSignal, signalLength);
-
-    // The dumped lines are gated on their inner IsFormed flags, NOT on when the
-    // partial-seed EMAs first produce a value. The Tsi line is emitted from
-    // Line.IsFormed (bar lineFormedAt); the Signal EMA is fed the tsi only from
-    // that bar, so it forms — and its line is emitted — at bar
-    // lineFormedAt + signalLength - 1.
-    const signalFormedAt = lineFormedAt + signalLength - 1;
-
-    const tsi = new Array(n);
-    const signal = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        tsi[i] = { time: t, value: i >= lineFormedAt ? tsiRaw[i] : null };
-        signal[i] = { time: t, value: i >= signalFormedAt ? signalRaw[i] : null };
-    }
-    return { tsi, signal };
+export interface TrueStrengthIndexCheckpoint {
+    readonly initialized: boolean;
+    readonly previousClose: number | null;
+    readonly firstMomentum: PartialSeedExponentialMovingAverageCheckpoint;
+    readonly firstAbsoluteMomentum: PartialSeedExponentialMovingAverageCheckpoint;
+    readonly doubleMomentum: PartialSeedExponentialMovingAverageCheckpoint;
+    readonly doubleAbsoluteMomentum: PartialSeedExponentialMovingAverageCheckpoint;
+    readonly signal: PartialSeedExponentialMovingAverageCheckpoint;
 }
+
+export class TrueStrengthIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    TrueStrengthIndexCheckpoint
+> {
+    private initialized = false;
+    private previousClose: number | null = null;
+    private readonly firstMomentum: PartialSeedExponentialMovingAverage;
+    private readonly firstAbsoluteMomentum: PartialSeedExponentialMovingAverage;
+    private readonly doubleMomentum: PartialSeedExponentialMovingAverage;
+    private readonly doubleAbsoluteMomentum: PartialSeedExponentialMovingAverage;
+    private readonly signal: PartialSeedExponentialMovingAverage;
+
+    constructor(
+        readonly firstLength: number,
+        readonly secondLength: number,
+        readonly signalLength: number,
+    ) {
+        super(['tsi', 'signal']);
+        integer(firstLength, firstLength, 1, 500, 'firstLength');
+        integer(secondLength, secondLength, 1, 500, 'secondLength');
+        integer(signalLength, signalLength, 1, 500, 'signalLength');
+        this.firstMomentum = new PartialSeedExponentialMovingAverage(firstLength);
+        this.firstAbsoluteMomentum = new PartialSeedExponentialMovingAverage(firstLength);
+        this.doubleMomentum = new PartialSeedExponentialMovingAverage(secondLength);
+        this.doubleAbsoluteMomentum = new PartialSeedExponentialMovingAverage(secondLength);
+        this.signal = new PartialSeedExponentialMovingAverage(signalLength);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const currentClose = finite(input.value?.close);
+        if (!this.initialized) {
+            if (commit) {
+                this.initialized = true;
+                this.previousClose = currentClose;
+            }
+            return {
+                isFormed: false,
+                values: [
+                    this.output('tsi', null, input.index),
+                    this.output('signal', null, input.index),
+                ],
+            };
+        }
+
+        const momentum = currentClose === null || this.previousClose === null
+            ? null
+            : currentClose - this.previousClose;
+        const absoluteMomentum = momentum === null ? null : Math.abs(momentum);
+        const firstMomentum = commit
+            ? this.firstMomentum.push(momentum)
+            : this.firstMomentum.preview(momentum);
+        const firstAbsoluteMomentum = commit
+            ? this.firstAbsoluteMomentum.push(absoluteMomentum)
+            : this.firstAbsoluteMomentum.preview(absoluteMomentum);
+        const doubleMomentum = commit
+            ? this.doubleMomentum.push(firstMomentum)
+            : this.doubleMomentum.preview(firstMomentum);
+        const doubleAbsoluteMomentum = commit
+            ? this.doubleAbsoluteMomentum.push(firstAbsoluteMomentum)
+            : this.doubleAbsoluteMomentum.preview(firstAbsoluteMomentum);
+
+        const rawTsi = doubleMomentum === null || doubleAbsoluteMomentum === null
+            ? null
+            : doubleAbsoluteMomentum === 0
+                ? 0
+                : finite(100 * doubleMomentum / doubleAbsoluteMomentum);
+        const tsi = input.index >= this.secondLength ? rawTsi : null;
+        const rawSignal = tsi === null
+            ? null
+            : commit ? this.signal.push(tsi) : this.signal.preview(tsi);
+        const signal = input.index >= this.secondLength + this.signalLength - 1
+            ? rawSignal
+            : null;
+        if (commit) this.previousClose = currentClose;
+        return {
+            isFormed: signal !== null,
+            values: [
+                this.output('tsi', tsi, input.index),
+                this.output('signal', signal, input.index),
+            ],
+        };
+    }
+
+    protected resetState(): void {
+        this.initialized = false;
+        this.previousClose = null;
+        this.firstMomentum.reset();
+        this.firstAbsoluteMomentum.reset();
+        this.doubleMomentum.reset();
+        this.doubleAbsoluteMomentum.reset();
+        this.signal.reset();
+    }
+
+    protected captureState(): TrueStrengthIndexCheckpoint {
+        return Object.freeze({
+            initialized: this.initialized,
+            previousClose: this.previousClose,
+            firstMomentum: this.firstMomentum.checkpoint(),
+            firstAbsoluteMomentum: this.firstAbsoluteMomentum.checkpoint(),
+            doubleMomentum: this.doubleMomentum.checkpoint(),
+            doubleAbsoluteMomentum: this.doubleAbsoluteMomentum.checkpoint(),
+            signal: this.signal.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: TrueStrengthIndexCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || typeof state.initialized !== 'boolean'
+            || (state.previousClose !== null && finite(state.previousClose) === null)
+            || (!state.initialized && state.previousClose !== null)
+            || state.firstMomentum?.count !== state.firstAbsoluteMomentum?.count
+            || state.doubleMomentum?.count !== state.doubleAbsoluteMomentum?.count) {
+            throw new TypeError('sschart: invalid True Strength Index checkpoint');
+        }
+        this.firstMomentum.restore(state.firstMomentum);
+        this.firstAbsoluteMomentum.restore(state.firstAbsoluteMomentum);
+        this.doubleMomentum.restore(state.doubleMomentum);
+        this.doubleAbsoluteMomentum.restore(state.doubleAbsoluteMomentum);
+        this.signal.restore(state.signal);
+        this.initialized = state.initialized;
+        this.previousClose = state.previousClose;
+    }
+}
+
+export const TrueStrengthIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    TrueStrengthIndexParameters
+> = registerIndicator({
+    id: 'TrueStrengthIndex',
+    name: 'True Strength Index',
+    description: 'Double-smoothed momentum oscillator with an EMA signal line.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'firstLength', name: 'First Length', type: IndicatorParameterType.Integer,
+            defaultValue: 25, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'secondLength', name: 'Second Length', type: IndicatorParameterType.Integer,
+            defaultValue: 13, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'signalLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
+            defaultValue: 7, min: 1, max: 500, step: 1,
+        },
+    ],
+    outputs: [
+        { id: 'tsi', name: 'TSI', defaultStyle: style(IndicatorSeriesStyle.Line, '#42a5f5', 2) },
+        { id: 'signal', name: 'Signal', defaultStyle: style(IndicatorSeriesStyle.Line, '#ffca28') },
+    ],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['tsi', 'truestrengthindex'],
+    scaleRange: { min: -100, max: 100 },
+    levels: [-25, 0, 25],
+    processorFactory: (parameters) => new TrueStrengthIndexProcessor(
+        integer(parameters?.firstLength, 25, 1, 500, 'firstLength'),
+        integer(parameters?.secondLength, 13, 1, 500, 'secondLength'),
+        integer(parameters?.signalLength, 7, 1, 500, 'signalLength'),
+    ),
+});

@@ -13,13 +13,30 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+
+// Named, because an escape inside a template literal is easy to mangle when this file is
+// edited by a tool rather than by hand.
+const NEWLINE = String.fromCharCode(10);
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-const { getClientCatalog } = require('../src/calc/index.js');
-const { loadDumpStatus, readDump } = require('./csharp-dump.js');
+const { getClientCatalog } = require('../src/index.js');
+const { loadDumpStatus, readDump, requireDump } = require('./csharp-dump.js');
+const { assertRecorded } = require('./parity-exceptions.js');
+const { runtimeSeries } = require('./runtime-series.js');
 
-const calcDir = join(__dirname, '..', '..', 'src', 'calc');
+// C# parameter keys are PascalCase and the client reads them lower-case or camelCase, so both
+// spellings go in.
+function toJsParams(csParams) {
+    const out = {};
+    for (const [k, v] of Object.entries(csParams || {})) {
+        out[k.toLowerCase()] = v;
+        out[k.charAt(0).toLowerCase() + k.slice(1)] = v;
+    }
+    return out;
+}
+
+const indicatorsDir = join(__dirname, '..', '..', 'src', 'calc');
 
 // The dump is still read live from .NET — no committed fixture — but it is produced once by
 // tools/parity-dump.mjs before node:test starts, not by this file racing the other parity file
@@ -28,130 +45,21 @@ const status = loadDumpStatus();
 const csharp = status.available ? readDump('catalog.json') : null;
 const csByKind = new Map((csharp || []).map((e) => [e.kind.toLowerCase(), e]));
 
-// Parse calc/index.ts for canon -> calc source file (imports + IMPLEMENTATIONS aliases).
-const indexSrc = readFileSync(join(calcDir, 'index.ts'), 'utf8');
-const fnToFile = {};
-for (const m of indexSrc.matchAll(/import\s*\{\s*(\w+)(?:\s+as\s+(\w+))?\s*\}\s*from\s*'\.\/(\w+)\.js'/g))
-    fnToFile[m[2] || m[1]] = m[3];
-const canonToFile = {};
-for (const m of indexSrc.matchAll(/\{\s*fn:\s*(\w+),\s*aliases:\s*\[([^\]]*)\]/g)) {
-    const aliases = m[2].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-    const canon = aliases.find((a) => /^[A-Z]/.test(a)) || aliases[aliases.length - 1];
-    canonToFile[canon] = fnToFile[m[1]];
-}
-
-// Indicators the client computes that the StockSharp catalog does not surface (client-only).
-const CLIENT_ONLY = new Set(['ChaikinOscillator', 'FastStochastic']);
-
-// Deliberate divergences from the StockSharp catalog. Both lists are asserted as exact sets, so
-// a new divergence fails and an entry that stops applying fails too — see assertAllowList.
-
-// The client puts the volume family on its own pane. StockSharp reports them as `main` because
-// its pane choice follows IndicatorMeasures, and a volume measure carries no "separate" hint;
-// drawn as an overlay they would be plotted against the price scale and be unreadable.
-const VOLUME_PANE = 'volume-measure indicator: overlaying it on the price scale is unreadable';
-const PANE_DELTAS = {
-    VolumeIndicator: VOLUME_PANE,
-    KlingerVolumeOscillator: VOLUME_PANE,
-    Sum: VOLUME_PANE,
-    PercentageVolumeOscillator: VOLUME_PANE,
-    PriceVolumeTrend: VOLUME_PANE,
-    WilliamsAccumulationDistribution: VOLUME_PANE,
-    WilliamsVariableAccumulationDistribution: VOLUME_PANE,
-};
-
-// Most of these are `cs=0`: a composite indicator keeps its settings on its inner indicators, and
-// the reflected catalog only sees settable scalar properties on the outer type. The client has to
-// surface those inner lengths for the settings dialog, so it declares them on the outer entry.
-const COMPOSITE_INNER_PARAMS = 'composite: StockSharp keeps these settings on the inner indicators, the client surfaces them on the outer entry';
-const PARAM_COUNT_DELTAS = {
-    MovingAverageConvergenceDivergence: COMPOSITE_INNER_PARAMS,
-    MovingAverageConvergenceDivergenceSignal: COMPOSITE_INNER_PARAMS,
-    StochasticOscillator: COMPOSITE_INNER_PARAMS,
-    Alligator: COMPOSITE_INNER_PARAMS,
-    Ichimoku: COMPOSITE_INNER_PARAMS,
-    AwesomeOscillator: COMPOSITE_INNER_PARAMS,
-    Acceleration: COMPOSITE_INNER_PARAMS,
-    ChaikinVolatility: COMPOSITE_INNER_PARAMS,
-    CompositeMomentum: COMPOSITE_INNER_PARAMS,
-    ElderImpulseSystem: COMPOSITE_INNER_PARAMS,
-    GatorOscillator: COMPOSITE_INNER_PARAMS,
-    KnowSureThing: COMPOSITE_INNER_PARAMS,
-    McClellanOscillator: COMPOSITE_INNER_PARAMS,
-    RelativeVigorIndex: COMPOSITE_INNER_PARAMS,
-    RangeActionVerificationIndex: COMPOSITE_INNER_PARAMS,
-    // The rest are genuine count differences rather than the composite pattern, left as-is
-    // because the client's parameter set is the one its settings dialog needs.
-    Trix: 'client exposes Length only; StockSharp also exposes the inner SMA length',
-    KasePeakOscillator: 'client exposes both cycle lengths plus a smoothing length',
-    SchaffTrendCycle: 'client exposes the full MACD + stochastic parameter set',
-    PercentagePriceOscillator: 'client exposes both MA lengths plus the signal length',
-};
-
-// Parameter defaults that deliberately differ from the platform's. Same exact-set rule as the
-// lists above: a new drift fails, and an entry that no longer applies fails too.
-//
-// Most of them are one decision: StockSharp's constructor values are its own history -- SMA 32,
-// RSI 15, CCI 15, Williams %R 5 -- while every charting package a visitor has used ships the
-// conventional periods, and the web catalog is what a first-time visitor sees. Whoever wants the
-// platform's number types it in; whoever wants the textbook indicator gets it without knowing
-// there was a choice.
-const CONVENTIONAL = 'client ships the conventional period; the platform default is its own history';
-const DEFAULT_DELTAS = {
-    SimpleMovingAverage: CONVENTIONAL,            // 20 vs 32
-    ExponentialMovingAverage: CONVENTIONAL,       // 20 vs 32
-    WeightedMovingAverage: CONVENTIONAL,          // 20 vs 32
-    BollingerBands: CONVENTIONAL,                 // 20 vs 32
-    Envelope: CONVENTIONAL,                       // 20 vs 32
-    RelativeStrengthIndex: CONVENTIONAL,          // 14 vs 15
-    AverageTrueRange: CONVENTIONAL,               // 14 vs 32
-    CommodityChannelIndex: CONVENTIONAL,          // 20 vs 15
-    WilliamsR: CONVENTIONAL,                      // 14 vs 5
-    DirectionalIndex: CONVENTIONAL,               // 14 vs 5
-    RateOfChange: CONVENTIONAL,                   // 12 vs 5
-    Trix: CONVENTIONAL,                           // 14 vs 32
-    BearPower: CONVENTIONAL,                      // 13 vs 32
-    BullPower: CONVENTIONAL,                      // 13 vs 32
-    OnBalanceVolumeMean: CONVENTIONAL,            // 14 vs 32
-    // Not a period at all: the platform's 1 makes the efficiency ratio window a single bar, so
-    // KAMA degenerates into the close price.
-    KaufmanAdaptiveMovingAverage: 'platform default of 1 collapses the adaptive window',
-    // The client's length is the outer stochastic window of its own five-parameter form; the
-    // platform exposes one Length on the composite (see PARAM_COUNT_DELTAS).
-    SchaffTrendCycle: 'client parameter set is not the platform single Length',
-    // 5% vs the platform's 0.1%. Left as a divergence rather than silently aligned because it is
-    // also inconsistent with the client's own Peak/Trough, which do use 0.001 -- one of the two
-    // is wrong and that is a product call, not a test's.
-    ZigZag: 'client uses a 5% reversal; the platform, and the client Peak/Trough, use 0.1%',
-};
-
-// Compare an observed set against an allow-list, failing on BOTH unexpected members and stale
-// entries. The two mean opposite things: something new drifted in, versus something was fixed
-// and its exemption should be deleted.
-function assertAllowList(observed, allowed, what) {
-    const unexpected = observed.filter((k) => !(k in allowed));
-    const stale = Object.keys(allowed).filter((k) => !observed.includes(k));
-    const problems = [];
-    if (unexpected.length) problems.push(`${what} NOT in the allow-list: ${unexpected.join(', ')}`);
-    if (stale.length) problems.push(`${what} allow-list entries that no longer apply (remove them): ${stale.join(', ')}`);
-    assert.equal(problems.length, 0, problems.join('\n'));
-}
-
 const catalog = getClientCatalog();
 
-// Source of a calc file plus, one level deep, any calc it forwards `params` to wholesale (e.g.
-// gator -> alligator). With a word-boundary match this also sees params read via destructuring.
-const srcCache = {};
-function reachableSrc(file, depth = 0) {
-    if (!file) return '';
-    if (srcCache[file] !== undefined) return srcCache[file];
-    let src = '';
-    try { src = readFileSync(join(calcDir, `${file}.ts`), 'utf8'); } catch { return ''; }
-    let combined = src;
-    if (depth < 1)
-        for (const mm of src.matchAll(/calc(\w+)\s*\([^)]*\bparams\b/g)) combined += '\n' + reachableSrc(mm[1].toLowerCase(), depth + 1);
-    srcCache[file] = combined;
-    return combined;
+// The source of an indicator: its own file, plus the shared module of the family it came from,
+// because a parameter can be read by a helper both of them use. One file per indicator is what
+// makes this exact -- it used to scan a batch calc reached through a hand-written name map.
+const sourceCache = {};
+function indicatorSource(kind) {
+    if (sourceCache[kind] !== undefined) return sourceCache[kind];
+    let text = '';
+    try { text = readFileSync(join(indicatorsDir, `${kind.toLowerCase()}.ts`), 'utf8'); } catch { return ''; }
+    for (const m of text.matchAll(/from '\.\/shared\/([a-z-]+)\.js'/g)) {
+        try { text += NEWLINE + readFileSync(join(indicatorsDir, 'shared', `${m[1]}.ts`), 'utf8'); } catch { /* none */ }
+    }
+    sourceCache[kind] = text;
+    return text;
 }
 
 describe('indicator catalog parity with StockSharp', () => {
@@ -159,50 +67,192 @@ describe('indicator catalog parity with StockSharp', () => {
         assert.ok(catalog.length > 120, `expected the full client catalog, got ${catalog.length}`);
     });
 
-    it('every catalog param key is actually consumed by its calc fn', () => {
+    it('every parameter an indicator declares is actually read by it', () => {
         const bad = [];
         for (const e of catalog) {
-            const file = canonToFile[e.serverKind];
-            if (!file) { if (e.params.length) bad.push(`${e.id}: no calc source mapped`); continue; }
-            const src = reachableSrc(file);
-            for (const p of e.params)
-                if (!new RegExp(`\\b${p.key}\\b`).test(src)) bad.push(`${e.id}: param '${p.key}' is never used in ${file}.ts`);
+            const src = indicatorSource(e.id);
+            if (!src) { bad.push(`${e.id}: no source file at src/calc/${e.id.toLowerCase()}.ts`); continue; }
+            for (const p of e.params) {
+                // A declared parameter nobody reads is a knob in the picker that does nothing.
+                if (!new RegExp(`\\b${p.key}\\b`).test(src)) {
+                    bad.push(`${e.id}: parameter '${p.key}' is declared but never read`);
+                }
+            }
         }
-        assert.equal(bad.length, 0, 'catalog/calc param drift:\n' + bad.join('\n'));
+        assert.equal(bad.length, 0, 'parameters declared and not read:' + NEWLINE + bad.join(NEWLINE));
     });
 
     it('every client indicator kind exists in the StockSharp catalog', (t) => {
-        if (!csharp) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
-        const missing = catalog.filter((e) => !csByKind.has(e.serverKind.toLowerCase()) && !CLIENT_ONLY.has(e.id));
-        assert.equal(missing.length, 0, 'client kinds absent from StockSharp: ' + missing.map((e) => e.id).join(', '));
+        requireDump(status);
+        const missing = catalog.filter((e) => !csByKind.has(e.serverKind.toLowerCase()));
+        assert.deepEqual(missing.map((e) => e.id), [],
+            'client kinds absent from StockSharp: ' + missing.map((e) => e.id).join(', '));
     });
 
-    it('pane / param-count deltas vs StockSharp are all known ones', (t) => {
-        if (!csharp) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+    it('every indicator sits where StockSharp puts it, with the parameters it exposes', (t) => {
+        requireDump(status);
         const paneDiffs = [];
         const countDiffs = [];
+        const nameDiffs = [];
         for (const e of catalog) {
             const cs = csByKind.get(e.serverKind.toLowerCase());
             if (!cs) continue;
             const csPane = cs.pane === 'main' ? 'overlay' : 'separate';
             if (e.pane !== csPane) paneDiffs.push(e.id);
-            if (e.params.length !== cs.params.length) countDiffs.push(e.id);
+            const csKnobCount = new Set((cs.params || []).map((p) => p.group || p.key)).size;
+            if (e.params.length !== csKnobCount) countDiffs.push(e.id);
+
+            // Counting them says nothing about which ones they are: an indicator can expose the
+            // right number under the wrong names and every value comparison still passes, because
+            // the parameters it was fed came from the platform in the first place -- handed over
+            // by key, so a key we spell differently is never set and the indicator quietly runs on
+            // its own default.
+            //
+            // Compared on the settings the platform puts on the indicator itself. A composite also
+            // reaches the same setting through each inner line -- the platform's Aroon has an
+            // Up.Length and a Down.Length behind the one Length a user sets -- and those are
+            // aliases of a knob, not knobs of their own.
+            // A knob answers to its own key and to every alias it declares -- the platform path a
+            // saved chart would name it by.
+            const spellings = e.params.map((p) => (
+                [p.key, ...(p.aliases || [])].map((k) => k.toLowerCase())
+            ));
+            // One entry per setting the platform actually has. Several of its names can lead to
+            // one knob -- a PPO's ShortPeriod is its short EMA's Length -- and the dump says which
+            // by grouping the names that move together, so a knob is counted and demanded once.
+            const byGroup = new Map();
+            for (const p of cs.params || []) {
+                const key = (p.group || p.key).toLowerCase();
+                if (!byGroup.has(key)) byGroup.set(key, []);
+                byGroup.get(key).push(p.key.toLowerCase());
+            }
+            const outer = [...byGroup.keys()];
+            const all = [...byGroup.values()].flat();
+
+            // Two questions, and they are not the same one. A knob we expose that the platform
+            // does not have is one a user can turn to no effect; a knob the platform puts on the
+            // indicator itself and we do not expose is one they cannot turn at all. Reaching a
+            // platform setting through an inner line is fine either way -- the Alligator's shifts
+            // live on Jaw, Teeth and Lips and we surface them flattened -- so an inner name counts
+            // as the platform having it, but not as an obligation to expose it.
+            //
+            // A platform name also carries the path it is reached by: Acceleration's short period
+            // is AoShortMaLength, because it sits on the Awesome Oscillator the Acceleration
+            // holds, and we flatten that away. So a platform name may be claimed by the knob it
+            // ends with -- but only by one of them, and only once. Matching every suffix freely
+            // would let our single `length` answer for the platform's Length AND its DxLength, and
+            // the second knob would look present while nothing can set it.
+            const takenByUs = new Set();
+            const takenByThem = new Set();
+            const claim = (test) => {
+                for (let round = 0; round < 2; round += 1) {
+                    for (let i = 0; i < spellings.length; i += 1) {
+                        if (takenByUs.has(i)) continue;
+                        for (let j = 0; j < all.length; j += 1) {
+                            if (takenByThem.has(j)) continue;
+                            if (!spellings[i].some((k) => test(all[j], k))) continue;
+                            takenByUs.add(i);
+                            takenByThem.add(j);
+                            break;
+                        }
+                    }
+                    // Exact spellings settle first, then the leftovers may match by path.
+                    test = (theirs, ours) => theirs.endsWith(ours);
+                }
+            };
+            claim((theirs, ours) => theirs === ours);
+
+            const invented = e.params.filter((_, i) => !takenByUs.has(i)).map((p) => p.key.toLowerCase());
+            // A group is missing when none of its names was claimed by a knob of ours.
+            const missing = [...byGroup.entries()]
+                .filter(([, names]) => names.every((n) => !takenByThem.has(all.indexOf(n))))
+                .map(([key]) => key);
+            if (invented.length || missing.length) {
+                const parts = [];
+                if (invented.length) parts.push(`exposes [${invented.join(', ')}] which the platform does not have`);
+                if (missing.length) parts.push(`does not expose [${missing.join(', ')}] which the platform puts on it`);
+                nameDiffs.push(`${e.id}: ${parts.join('; ')}`);
+            }
         }
         if (paneDiffs.length) console.log(`[parity] pane deltas (${paneDiffs.length}): ` + paneDiffs.join(', '));
         if (countDiffs.length) console.log(`[parity] param-count deltas (${countDiffs.length}): ` + countDiffs.join(', '));
 
-        // These used to be printed and forgotten, which meant a genuinely new divergence looked
-        // exactly like the twenty-seven we have decided to live with. Both lists are now exact.
-        assertAllowList(paneDiffs, PANE_DELTAS, 'pane placements differing from StockSharp');
-        assertAllowList(countDiffs, PARAM_COUNT_DELTAS, 'param counts differing from StockSharp');
+        // A difference from the platform is a failure, not a fact to be filed. The client and the
+        // terminal draw the same indicator, and somebody who adds it in both places has to get the
+        // same picture -- so there is nothing here to record, only to fix.
+        assert.deepEqual(paneDiffs, [],
+            `${paneDiffs.length} indicators sit on a different pane than StockSharp: ` + paneDiffs.join(', '));
+        assert.deepEqual(nameDiffs, [],
+            `${nameDiffs.length} indicators name their parameters differently than StockSharp:` + NEWLINE
+            + nameDiffs.join(NEWLINE));
+        assert.deepEqual(countDiffs, [],
+            `${countDiffs.length} indicators expose a different number of parameters than StockSharp: `
+            + countDiffs.join(', '));
     });
 
     // Counting parameters says nothing about their values, and the numeric parity suite feeds the
     // PLATFORM's parameters into the client calc -- so a client default that disagrees with the
     // platform is invisible to every other check here. A user adding the indicator on the site and
     // on the terminal gets two different lines, and nothing says so.
-    it('every parameter default matches StockSharp, bar the named divergences', (t) => {
-        if (!csharp) return t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+    it('every indicator measures the same thing StockSharp says it measures', (t) => {
+        requireDump(status);
+        // The measure is what a chart scales a pane by -- a percentage runs 0..100, a correlation
+        // -1..+1, a volume neither. Getting it wrong puts an indicator on a scale that hides it,
+        // and nothing in a value comparison notices, because the numbers are right either way.
+        const MEASURES = { price: 'Price', percent: 'Percent', volume: 'Volume', 'minus-one-plus-one': 'MinusOnePlusOne' };
+        const drifted = [];
+        for (const e of catalog) {
+            const cs = csByKind.get(e.serverKind.toLowerCase());
+            if (!cs) continue;
+            const ours = MEASURES[e.measure];
+            if (ours === undefined) {
+                drifted.push(`${e.id}: measures '${e.measure}', which the platform has no name for`);
+            } else if (ours !== cs.measure) {
+                drifted.push(`${e.id}: client ${e.measure}, platform ${cs.measure}`);
+            }
+        }
+        assert.deepEqual(drifted, [],
+            `${drifted.length} indicators measure something other than what StockSharp says:` + NEWLINE
+            + drifted.join(NEWLINE));
+    });
+
+    it('every indicator needs as many bars to form as StockSharp says it needs', (t) => {
+        requireDump(status);
+        // The platform states its warm-up: NumValuesToInitialize, which several indicators
+        // override -- an Alligator defers to its jaw, a shifted line adds its shift. Ours states
+        // nothing, so this asks the observable form of the same thing: the bar its first value
+        // appears on. An indicator that warms up for longer than the platform silently drops the
+        // opening of every chart it is added to.
+        const dump = readDump('values.json');
+        const bars = dump.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
+        const drifted = [];
+
+        for (const cs of dump.indicators) {
+            const row = csByKind.get(cs.kind.toLowerCase());
+            if (!row || !(row.warmUp > 0)) continue;
+            const platformFirst = (cs.values || []).findIndex((v) => v !== null && v !== undefined);
+            if (platformFirst < 0) continue;
+
+            let series;
+            try { series = runtimeSeries(cs.kind, bars, toJsParams(cs.params)); }
+            catch { continue; }
+            if (!series) continue;
+            const line = Array.isArray(series) ? series : series[Object.keys(series)[0]];
+            const ourFirst = line.findIndex((p) => p && typeof p.value === 'number' && Number.isFinite(p.value));
+
+            if (ourFirst !== platformFirst) {
+                drifted.push(`${cs.kind}: first value on bar ${ourFirst}, platform on ${platformFirst}`
+                    + ` (it declares ${row.warmUp} values to initialise)`);
+            }
+        }
+
+        assert.deepEqual(drifted, [],
+            `${drifted.length} indicators start drawing on a different bar than StockSharp:` + NEWLINE
+            + drifted.join(NEWLINE));
+    });
+
+    it('every parameter default matches StockSharp', (t) => {
+        requireDump(status);
         const drifted = [];
         const detail = [];
         for (const e of catalog) {
@@ -222,6 +272,10 @@ describe('indicator catalog parity with StockSharp', () => {
             }
         }
         if (detail.length) console.log('[parity] default deltas:\n  ' + detail.join('\n  '));
-        assertAllowList(drifted, DEFAULT_DELTAS, 'parameter defaults differing from StockSharp');
+        // Same rule, and this is the divergence that shows: a default that disagrees means the
+        // same indicator draws a different line here than it does on the terminal.
+        assert.deepEqual(drifted, [],
+            `${drifted.length} indicators have a parameter default that disagrees with StockSharp:`
+            + NEWLINE + '  ' + detail.join(NEWLINE + '  '));
     });
 });

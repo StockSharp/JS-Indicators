@@ -1,41 +1,86 @@
-// Lowest indicator (Algo.Indicators/Lowest.cs).
-// Trailing minimum of the candle CLOSE over `length` bars. Mirror of Highest.
-// Aligned 1:1 with input candles.
-//
-// Lowest.cs reads `input.ToCandle().LowPrice`, but the class inherits
-// [IndicatorIn(typeof(DecimalIndicatorValue))] from BaseIndicator and does not
-// override it, so the platform feeds it a decimal that ToCandle() expands into
-// a candle with open == high == low == close — the close on a candle feed. See
-// highest.ts for the full mechanism.
-//
-// DecimalLengthIndicator: IsFormed only once `length` values are buffered, so
-// nothing is emitted before index `length - 1`.
-//
-// Default length: 5 (matches the .cs default).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMinimum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    HighestProcessor,
+    LENGTH_STYLE,
+    LengthIndicatorParameters,
+    close,
+    resolvedLength,
+} from './shared/core.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export class LowestProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly minimum: RollingMinimum;
 
-/** Trailing min of candle.close over `length` bars. */
-export function calcLowest(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 5;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
-
-    for (let i = length - 1; i < n; i++) {
-        let lo = +Infinity;
-        let bad = false;
-        for (let j = i - length + 1; j <= i; j++) {
-            const c = candles[j];
-            const cl = c && c.close;
-            if (typeof cl !== 'number' || !Number.isFinite(cl)) { bad = true; break; }
-            if (cl < lo) lo = cl;
-        }
-        if (bad) continue;
-        out[i] = { time: candles[i].time, value: lo };
+    constructor(readonly length: number) {
+        super(['line']);
+        this.minimum = new RollingMinimum(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        // The close, not the bar low — mirror of HighestProcessor.
+        const close = input.value?.close;
+        const value = commit
+            ? this.minimum.push(close)
+            : this.minimum.preview(close);
+        return {
+            isFormed: this.minimum.isFormed || value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.minimum.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.minimum.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void {
+        this.minimum.restore(state);
+    }
 }
+
+export const LowestIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LengthIndicatorParameters
+> = registerIndicator({
+    id: 'Lowest',
+    name: 'Lowest',
+    description: 'Lowest candle close in the configured trailing window.',
+    category: IndicatorCategory.SupportResistance,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 5, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'Lowest',
+        defaultStyle: { ...LENGTH_STYLE, color: '#ef5350' },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['lowest'],
+    processorFactory: (parameters) => new LowestProcessor(
+        resolvedLength(parameters, 5, 1),
+    ),
+});

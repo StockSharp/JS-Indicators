@@ -1,87 +1,121 @@
-// Rank Correlation Index (Spearman) — JS port of
-// D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\RankCorrelationIndex.cs.
-//
-// For each window of `Length` closes, compute the Pearson correlation between
-// the rank of each close in the window (average-rank tie-handling) and the
-// trivial period ranks 1..Length. The result is Spearman's rho, in [-1, 1].
-// Warm-up: first (length-1) values null.
-// Deviations from .cs: none — same tie-handling, same Pearson-of-ranks
-// computation.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedPeriod,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export function rankCorrelation(values: readonly number[]): number {
+    const count = values.length;
+    const indices = Array.from({ length: count }, (_, index) => index)
+        .sort((left, right) => values[left] - values[right]);
+    const ranks = new Array<number>(count);
+    for (let start = 0; start < count;) {
+        let end = start + 1;
+        while (end < count && values[indices[end]] === values[indices[start]]) end += 1;
+        const rank = (start + 1 + end) / 2;
+        for (let index = start; index < end; index += 1) ranks[indices[index]] = rank;
+        start = end;
+    }
 
-/** Build rank array with average rank for ties — direct port of .cs GetRanks. */
-function ranksWithTies(values: number[]): number[] {
-    const n = values.length;
-    const ranks: number[] = new Array(n);
-    const indices: number[] = new Array(n);
-    for (let i = 0; i < n; i++) indices[i] = i;
-    indices.sort((a: number, b: number) => values[a] - values[b]);
+    const mean = (count + 1) / 2;
+    let numerator = 0;
+    let priceSquares = 0;
+    let timeSquares = 0;
+    for (let index = 0; index < count; index += 1) {
+        const priceDelta = ranks[index] - mean;
+        const timeDelta = index + 1 - mean;
+        numerator += priceDelta * timeDelta;
+        priceSquares += priceDelta * priceDelta;
+        timeSquares += timeDelta * timeDelta;
+    }
+    const denominator = Math.sqrt(priceSquares * timeSquares);
+    return denominator === 0 ? 0 : numerator / denominator;
+}
 
-    for (let i = 0; i < n; ) {
-        let j = i;
-        let sum = 0;
-        let cnt = 0;
-        const val = values[indices[i]];
-        while (j < n && values[indices[j]] === val) {
-            sum += j + 1;
-            cnt++;
-            j++;
+export class RankCorrelationIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RingBufferCheckpoint<number | null>
+> {
+    private readonly prices: RingBuffer<number | null>;
+
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedPeriod(length, length, 'length');
+        this.prices = new RingBuffer(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const previous = this.prices.toArray();
+        const window = this.prices.full ? previous.slice(1) : previous;
+        window.push(close);
+        const value = window.length === this.length
+            && window.every((item): item is number => item !== null)
+            ? finite(rankCorrelation(window))
+            : null;
+        if (commit) this.prices.push(close);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.prices.clear(); }
+    protected captureState(): RingBufferCheckpoint<number | null> {
+        return this.prices.checkpoint();
+    }
+    protected restoreState(state: RingBufferCheckpoint<number | null>): void {
+        if (state === null || typeof state !== 'object'
+            || !Array.isArray(state.values) || state.values.length > this.length
+            || state.values.some((value) => value !== null && finite(value) === null)) {
+            throw new TypeError('sschart: invalid Rank Correlation Index checkpoint');
         }
-        const avgRank = sum / cnt;
-        for (let k = i; k < j; k++) ranks[indices[k]] = avgRank;
-        i = j;
+        this.prices.restore(state);
     }
-    return ranks;
 }
 
-function pearsonOfRanks(r1: number[], r2: number[]): number {
-    const n = r1.length;
-    if (n <= 1) return 0;
-    let m1 = 0;
-    let m2 = 0;
-    for (let i = 0; i < n; i++) { m1 += r1[i]; m2 += r2[i]; }
-    m1 /= n; m2 /= n;
-    let num = 0;
-    let sq1 = 0;
-    let sq2 = 0;
-    for (let i = 0; i < n; i++) {
-        const d1 = r1[i] - m1;
-        const d2 = r2[i] - m2;
-        num += d1 * d2;
-        sq1 += d1 * d1;
-        sq2 += d2 * d2;
-    }
-    const den = Math.sqrt(sq1 * sq2);
-    if (den === 0) return 0;
-    return num / den;
-}
-
-export function calcRankCorrelationIndex(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
-
-    if (length < 1 || n < length) return out;
-
-    const periodRanks = new Array(length);
-    for (let i = 0; i < length; i++) periodRanks[i] = i + 1;
-
-    for (let i = length - 1; i < n; i++) {
-        const window = new Array(length);
-        let bad = false;
-        for (let k = 0; k < length; k++) {
-            const v = candles[i - length + 1 + k] && candles[i - length + 1 + k].close;
-            if (typeof v !== 'number' || !Number.isFinite(v)) { bad = true; break; }
-            window[k] = v;
-        }
-        if (bad) continue;
-        const valueRanks = ranksWithTies(window);
-        out[i] = { time: candles[i].time, value: pearsonOfRanks(valueRanks, periodRanks) };
-    }
-    return out;
-}
+export const RankCorrelationIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'RankCorrelationIndex',
+    name: 'Rank Correlation Index',
+    description: 'Spearman correlation between close-price rank and time rank.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14, 1)],
+    outputs: [{ id: 'line', name: 'RCI', defaultStyle: lineStyle('#7e57c2') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['rci', 'rankcorrelationindex'],
+    scaleRange: { min: -1, max: 1 },
+    levels: [0],
+    processorFactory: (parameters) => new RankCorrelationIndexProcessor(
+        resolvedPeriod(parameters?.length, 14, 'length'),
+    ),
+});

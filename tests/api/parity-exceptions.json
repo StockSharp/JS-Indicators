@@ -1,0 +1,11 @@
+{
+    "stress-no-js-calc": {
+        "CandlePatternIndicator": "pattern recognition, not a numeric series — no chart line to draw",
+        "VolumeProfileIndicator": "histogram over price levels, not a series — the platform exposes no line for it either"
+    },
+    "scalar-no-js-calc": {
+        "CandlePatternIndicator": "pattern recognition, not a numeric series — no chart line to draw",
+        "VolumeProfileIndicator": "histogram over price levels, not a series — the platform exposes no line for it either"
+    },
+    "scalar-non-scalar": {}
+}

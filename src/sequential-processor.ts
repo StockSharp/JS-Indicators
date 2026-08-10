@@ -15,6 +15,7 @@ export interface IndicatorCalculationResult {
 export interface SequentialIndicatorCheckpoint<TState> {
     readonly version: 1;
     readonly position: number;
+    readonly formed: boolean;
     readonly state: TState;
 }
 
@@ -32,6 +33,7 @@ function outputId(value: unknown, name: string): string {
 export abstract class SequentialIndicatorProcessor<TInput, TState>
 implements IIndicatorProcessor<TInput> {
     private positionValue = 0;
+    private formedValue = false;
     private readonly outputIds: ReadonlySet<string>;
 
     protected constructor(outputIds: readonly string[]) {
@@ -49,19 +51,27 @@ implements IIndicatorProcessor<TInput> {
         this.validateInput(input);
         const calculation = this.calculate(input, input.isFinal);
         const result = this.normalizeResult(calculation, input.index);
+        // Being formed is a latch, as it is on the platform: an indicator that has warmed up stays
+        // warmed up, and a bar it cannot answer for -- a flat candle, a gap, a missing volume --
+        // leaves a hole in the line rather than taking the whole line back to its warm-up.
+        if (result.isFormed && input.isFinal) this.formedValue = true;
         if (input.isFinal) this.positionValue += 1;
-        return result;
+        return this.formedValue && !result.isFormed
+            ? Object.freeze({ ...result, isFormed: true })
+            : result;
     }
 
     reset(): void {
         this.resetState();
         this.positionValue = 0;
+        this.formedValue = false;
     }
 
     checkpoint(): SequentialIndicatorCheckpoint<TState> {
         return Object.freeze({
             version: 1 as const,
             position: this.positionValue,
+            formed: this.formedValue,
             state: this.captureState(),
         });
     }
@@ -73,13 +83,16 @@ implements IIndicatorProcessor<TInput> {
             throw new TypeError('sschart: invalid sequential indicator checkpoint');
         }
         const previousPosition = this.positionValue;
+        const previousFormed = this.formedValue;
         const previousState = this.captureState();
         try {
             this.restoreState(checkpoint.state);
             this.positionValue = checkpoint.position;
+            this.formedValue = checkpoint.formed === true;
         } catch (error) {
             try { this.restoreState(previousState); } catch { /* preserve the original failure */ }
             this.positionValue = previousPosition;
+            this.formedValue = previousFormed;
             throw error;
         }
     }

@@ -1,94 +1,145 @@
-// Approval Flow Index (AFI).
-// Port of StockSharp Algo.Indicators ApprovalFlowIndex.cs:
-//
-//   bar 0:          seed prevClose = close, emit null.
-//   bars 1..Length: count++. each bar adds candle.TotalVolume to either
-//                   _totalUpVolume (close > prevClose), _totalDownVolume
-//                   (close < prevClose), or neither (==). prevClose is
-//                   updated to current close. Emit null.
-//   bar Length:     count reaches Length → IsFormed = true. STILL update
-//                   totals on this bar, but do NOT update prevClose.
-//                   Emit AFI = 100 * (totalUp - totalDown) / (totalUp + totalDown).
-//   bar > Length:   IsFormed already true. The .cs code path is:
-//                     - compute upVolume/downVolume against the FROZEN
-//                       _prevClose (the close from bar Length-1).
-//                     - update _totalUpVolume / _totalDownVolume.
-//                     - return afi using the new totals.
-//                     - prevClose is NOT touched any more.
-//                   This is a quirk of the .cs (the `if (IsFormed) return`
-//                   short-circuit skips the `_prevClose = candle.ClosePrice`
-//                   write at the bottom). We replicate it verbatim so chart
-//                   values match the desktop terminal.
-//
-// Output: { time, value } where value is in percent, range [-100..+100].
-// Returns null when totals sum to zero (e.g. flat close series).
-//
-// .cs deviation note: the prevClose-freeze quirk described above is the
-// only non-obvious behaviour; everything else is a straight port.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export interface ApprovalFlowIndexCheckpoint {
+    readonly previousClose: number;
+    readonly totalUp: number;
+    readonly totalDown: number;
+    readonly count: number;
+    readonly formed: boolean;
+}
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcApprovalFlowIndex(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
+export class ApprovalFlowIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    ApprovalFlowIndexCheckpoint
+> {
+    private previousClose = 0;
+    private totalUp = 0;
+    private totalDown = 0;
+    private count = 0;
+    private formed = false;
 
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    let prevClose = 0;          // .cs uses decimal 0 as "uninitialised" sentinel
-    let totalUp = 0;
-    let totalDown = 0;
-    let count = 0;
-    let isFormed = false;
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const close = c && c.close;
-        const vol = c && c.volume;
-        if (typeof close !== 'number' || !Number.isFinite(close)) {
-            // Gap in input — skip, keep state, emit null.
-            continue;
-        }
-        const v = typeof vol === 'number' && Number.isFinite(vol) ? vol : 0;
-
-        // Seed branch — .cs treats prevClose == 0 as "not yet seeded".
-        if (prevClose === 0) {
-            prevClose = close;
-            continue;
-        }
-
-        if (!isFormed) {
-            count++;
-            if (count === length) isFormed = true;
-        }
-
-        const upVolume = close > prevClose ? v : 0;
-        const downVolume = close < prevClose ? v : 0;
-
-        totalUp += upVolume;
-        totalDown += downVolume;
-
-        if (isFormed) {
-            const totalVolume = totalUp + totalDown;
-            if (totalVolume !== 0) {
-                out[i] = { time: c.time, value: 100 * (totalUp - totalDown) / totalVolume };
-            }
-            // .cs short-circuits here; prevClose stays frozen.
-            continue;
-        }
-
-        // Only reached on bars where IsFormed is still false.
-        prevClose = close;
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1)
+            throw new RangeError('sschart: AFI length must be a positive integer');
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        if (close === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+        if (this.previousClose === 0) {
+            if (commit) this.previousClose = close;
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const volume = finite(input.value?.volume) ?? 0;
+        const count = this.formed ? this.count : this.count + 1;
+        const formed = this.formed || count === this.length;
+        const totalUp = this.totalUp + (close > this.previousClose ? volume : 0);
+        const totalDown = this.totalDown + (close < this.previousClose ? volume : 0);
+        const total = totalUp + totalDown;
+        const value = formed && total !== 0
+            ? finite(100 * (totalUp - totalDown) / total)
+            : null;
+
+        if (commit) {
+            this.count = count;
+            this.formed = formed;
+            this.totalUp = totalUp;
+            this.totalDown = totalDown;
+            if (!formed) this.previousClose = close;
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.previousClose = 0;
+        this.totalUp = 0;
+        this.totalDown = 0;
+        this.count = 0;
+        this.formed = false;
+    }
+
+    protected captureState(): ApprovalFlowIndexCheckpoint {
+        return Object.freeze({
+            previousClose: this.previousClose,
+            totalUp: this.totalUp,
+            totalDown: this.totalDown,
+            count: this.count,
+            formed: this.formed,
+        });
+    }
+
+    protected restoreState(state: ApprovalFlowIndexCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || finite(state.previousClose) === null
+            || finite(state.totalUp) === null || finite(state.totalDown) === null
+            || !Number.isInteger(state.count) || state.count < 0 || state.count > this.length
+            || typeof state.formed !== 'boolean'
+            || state.formed !== (state.count === this.length)) {
+            throw new TypeError('sschart: invalid Approval Flow Index checkpoint');
+        }
+        this.previousClose = state.previousClose;
+        this.totalUp = state.totalUp;
+        this.totalDown = state.totalDown;
+        this.count = state.count;
+        this.formed = state.formed;
+    }
 }
+
+export const ApprovalFlowIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'ApprovalFlowIndex',
+    name: 'Approval Flow Index',
+    description: 'Cumulative balance of volume on approved upward and downward moves.',
+    category: IndicatorCategory.Volume,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14)],
+    outputs: [{ id: 'line', name: 'AFI', defaultStyle: lineStyle('#42a5f5') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['afi', 'approvalflowindex'],
+    scaleRange: { min: 0, max: 100 },
+    levels: [50],
+    processorFactory: (parameters) => new ApprovalFlowIndexProcessor(
+        resolvedLength(parameters, 14),
+    ),
+});

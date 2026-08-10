@@ -1,50 +1,163 @@
-// Harmonic Oscillator.
-// Port of StockSharp Algo.Indicators HarmonicOscillator.cs.
-//
-// Pre-computed once: sin[i] = sin(2π · i / length) for i in 0..length-1.
-//
-// For each formed bar (Buffer holds `length` finite closes; oldest first):
-//   sum = Σ buffer[length - 1 - i] · sin[i]    for i in 0..length-1
-//                                              (i.e. newest sample × sin[0],
-//                                              one bar older × sin[1], ...)
-//   value = sum / length
-//
-// .cs deviation notes:
-// (a) Source: `input.ToDecimal(Source)` defaults to close. We use close.
-// (b) Warm-up: IsFormed flips true once Buffer.Count == Length, so the
-//     first non-null output lands at index (length - 1).
-// (c) sin[0] = 0, so the most-recent close contributes nothing — that's
-//     a property of the formula, preserved here.
-// (d) `IsFinal=false` (intra-bar) branch from the .cs is ignored.
-// (e) Measure = Percent is metadata only — we leave the value un-scaled.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import {
+    CycleLengthParameters,
+} from './shared/cycle.js';
+import {
+    finite,
+    length,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface HarmonicOscillatorCheckpoint {
+    readonly values: RingBufferCheckpoint<number | null>;
+}
 
-export function calcHarmonicOscillator(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export interface HarmonicEvaluation {
+    readonly size: number;
+    readonly sine: number;
+    readonly cosine: number;
+    readonly invalid: number;
+}
 
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0 || n < length) return out;
+export class HarmonicOscillatorProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    HarmonicOscillatorCheckpoint
+> {
+    private readonly values: RingBuffer<number | null>;
+    private readonly sineStep: number;
+    private readonly cosineStep: number;
+    private sine = 0;
+    private cosine = 0;
+    private invalid = 0;
 
-    const sin = new Array(length);
-    for (let i = 0; i < length; i++) sin[i] = Math.sin(2 * Math.PI * i / length);
-
-    for (let i = length - 1; i < n; i++) {
-        let sum = 0;
-        let bad = false;
-        // Walk backwards over the last `length` closes.
-        // j = 0 → newest, j = length-1 → oldest.
-        for (let j = 0; j < length; j++) {
-            const c = candles[i - j] && candles[i - j].close;
-            if (typeof c !== 'number' || !Number.isFinite(c)) { bad = true; break; }
-            sum += c * sin[j];
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500) {
+            throw new RangeError(
+                'sschart: Harmonic Oscillator length must be an integer from 1 to 500',
+            );
         }
-        if (bad) continue;
-        out[i] = { time: candles[i].time, value: sum / length };
+        this.values = new RingBuffer<number | null>(length);
+        const angle = 2 * Math.PI / length;
+        this.sineStep = Math.sin(angle);
+        this.cosineStep = Math.cos(angle);
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const incoming = finite(input.value?.close);
+        const evaluation = this.evaluate(incoming);
+        if (commit) {
+            this.values.push(incoming);
+            this.sine = evaluation.sine;
+            this.cosine = evaluation.cosine;
+            this.invalid = evaluation.invalid;
+        }
+        const candidate = evaluation.size === this.length && evaluation.invalid === 0
+            ? evaluation.sine / this.length
+            : null;
+        const value = finite(candidate);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.values.clear();
+        this.sine = 0;
+        this.cosine = 0;
+        this.invalid = 0;
+    }
+
+    protected captureState(): HarmonicOscillatorCheckpoint {
+        return Object.freeze({ values: this.values.checkpoint() });
+    }
+
+    protected restoreState(state: HarmonicOscillatorCheckpoint): void {
+        const values = state?.values?.values;
+        if (!Array.isArray(values) || values.length > this.length
+            || values.some((value) => value !== null && finite(value) === null)) {
+            throw new TypeError('sschart: invalid Harmonic Oscillator checkpoint');
+        }
+        this.resetState();
+        for (const value of values) this.append(value);
+    }
+
+    private evaluate(incoming: number | null): HarmonicEvaluation {
+        const outgoing = this.values.full ? (this.values.front() ?? null) : null;
+        const size = Math.min(this.length, this.values.size + 1);
+        const invalid = this.invalid
+            - (this.values.full && outgoing === null ? 1 : 0)
+            + (incoming === null ? 1 : 0);
+        if (this.length === 1) {
+            return { size, sine: 0, cosine: incoming ?? 0, invalid };
+        }
+        const sine = this.sine * this.cosineStep + this.cosine * this.sineStep;
+        const cosine = this.cosine * this.cosineStep - this.sine * this.sineStep
+            - (this.values.full ? (outgoing ?? 0) : 0)
+            + (incoming ?? 0);
+        return { size, sine, cosine, invalid };
+    }
+
+    private append(value: number | null): void {
+        const evaluation = this.evaluate(value);
+        this.values.push(value);
+        this.sine = evaluation.sine;
+        this.cosine = evaluation.cosine;
+        this.invalid = evaluation.invalid;
+    }
 }
+
+export const HarmonicOscillatorIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    CycleLengthParameters
+> = registerIndicator({
+    id: 'HarmonicOscillator',
+    name: 'Harmonic Oscillator',
+    description: 'Sine-weighted average of closing prices over a fixed cycle.',
+    category: IndicatorCategory.Cycle,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 14, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'Harmonic Oscillator',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#ab47bc',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+
+    aliases: ['harmonic', 'harmonicoscillator'],
+    levels: [0],
+    processorFactory: (parameters) => new HarmonicOscillatorProcessor(
+        length(parameters?.length, 14),
+    ),
+});

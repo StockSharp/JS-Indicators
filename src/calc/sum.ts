@@ -1,37 +1,81 @@
-// Sum of N — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\Sum.cs.
-//
-// Rolling sum of the last `Length` close prices. Default Length=15.
-//   sum[i] = close[i-Length+1] + ... + close[i]
-// Warm-up: first (length-1) values null.
-// Deviations from .cs: none — straight rolling sum.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingSum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    LENGTH_STYLE,
+    LengthIndicatorParameters,
+    close,
+    resolvedLength,
+} from './shared/core.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class SumProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly sum: RollingSum;
 
-export function calcSum(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 15;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    let sum = 0;
-    let invalid = 0;
-    for (let i = 0; i < n; i++) {
-        const v = candles[i] && candles[i].close;
-        const ok = typeof v === 'number' && Number.isFinite(v);
-        if (ok) sum += v; else invalid++;
-        if (i >= length) {
-            const drop = candles[i - length] && candles[i - length].close;
-            const dropOk = typeof drop === 'number' && Number.isFinite(drop);
-            if (dropOk) sum -= drop; else invalid--;
-        }
-        if (i >= length - 1) {
-            out[i] = { time: candles[i].time, value: invalid === 0 ? sum : null };
-        }
+    constructor(readonly length: number) {
+        super(['line']);
+        this.sum = new RollingSum(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const value = commit
+            ? this.sum.push(close(input))
+            : this.sum.preview(close(input));
+        return {
+            isFormed: this.sum.isFormed || value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.sum.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.sum.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void { this.sum.restore(state); }
 }
+
+export const SumIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LengthIndicatorParameters
+> = registerIndicator({
+    id: 'Sum',
+    name: 'Sum',
+    description: 'Rolling sum of closing prices over the configured window.',
+    category: IndicatorCategory.Statistical,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 15, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'Sum',
+        defaultStyle: { ...LENGTH_STYLE, color: '#78909c' },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Volume,
+
+    aliases: ['sum'],
+    processorFactory: (parameters) => new SumProcessor(
+        resolvedLength(parameters, 15, 1),
+    ),
+});

@@ -1,57 +1,131 @@
-// Awesome Oscillator (Bill Williams).
-//   AO[i] = SMA(median, 5)[i] - SMA(median, 34)[i]
-//   median = (high + low) / 2
-// Histogram colour hint: `up = AO[i] >= AO[i-1]` (rising → green bar).
-// Bar 0 has no prior reference; we default `up:true` to mirror the volume
-// indicator's neutral colour fallback.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-import { simpleMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-/**
- * @typedef {{time: string|number, value: number|null, up: boolean}} AOPoint
- */
-
-/**
- * @param {CandlePoint[]} candles
- * @param {{shortLength?: number, longLength?: number}} [params]
- * @returns {AOPoint[]}
- */
-export function calcAwesomeOscillator(candles: CandlePoint[], params?: IndicatorParams) {
-    const shortLen = params && Number.isFinite(params.shortLength) ? (params.shortLength | 0) : 5;
-    const longLen = params && Number.isFinite(params.longLength) ? (params.longLength | 0) : 34;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const medians = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        if (typeof h === 'number' && Number.isFinite(h) &&
-            typeof l === 'number' && Number.isFinite(l)) {
-            medians[i] = (h + l) / 2;
-        } else {
-            medians[i] = NaN;
-        }
-    }
-
-    const shortSma = simpleMA(medians, shortLen);
-    const longSma = simpleMA(medians, longLen);
-
-    const out = new Array(n);
-    let prev: number | null = null;
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        const s = shortSma[i];
-        const l = longSma[i];
-        let v: number | null = null;
-        if (s !== null && l !== null) v = s - l;
-        let up = true;
-        if (v !== null && prev !== null) up = v >= prev;
-        out[i] = { time: t, value: v, up };
-        if (v !== null) prev = v;
-    }
-    return out;
+export interface AwesomeOscillatorParameters extends IndicatorParameters {
+    readonly shortMaLength: number;
+    readonly longMaLength: number;
 }
+
+export interface AwesomeOscillatorCheckpoint {
+    readonly short: RollingWindowCheckpoint;
+    readonly long: RollingWindowCheckpoint;
+    readonly previous: number | null;
+}
+
+export class AwesomeOscillatorProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    AwesomeOscillatorCheckpoint
+> {
+    private readonly short: SimpleMovingAverage;
+    private readonly long: SimpleMovingAverage;
+    private previous: number | null = null;
+
+    constructor(readonly shortMaLength: number, readonly longMaLength: number) {
+        super(['value']);
+        this.short = new SimpleMovingAverage(shortMaLength);
+        this.long = new SimpleMovingAverage(longMaLength);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const median = high === null || low === null ? null : (high + low) / 2;
+        const short = commit ? this.short.push(median) : this.short.preview(median);
+        const long = commit ? this.long.push(median) : this.long.preview(median);
+        const value = short === null || long === null ? null : short - long;
+        const up = value === null || this.previous === null ? true : value >= this.previous;
+        if (commit && value !== null) this.previous = value;
+        return {
+            isFormed: value !== null,
+            values: [this.output('value', value, input.index, { up })],
+        };
+    }
+
+    protected resetState(): void {
+        this.short.reset();
+        this.long.reset();
+        this.previous = null;
+    }
+    protected captureState(): AwesomeOscillatorCheckpoint {
+        return Object.freeze({
+            short: this.short.checkpoint(),
+            long: this.long.checkpoint(),
+            previous: this.previous,
+        });
+    }
+    protected restoreState(state: AwesomeOscillatorCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || (state.previous !== null && finite(state.previous) === null)) {
+            throw new TypeError('sschart: invalid Awesome Oscillator checkpoint');
+        }
+        this.short.restore(state.short);
+        this.long.restore(state.long);
+        this.previous = state.previous;
+    }
+}
+
+export const AwesomeOscillatorIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    AwesomeOscillatorParameters
+> = registerIndicator({
+    id: 'AwesomeOscillator',
+    name: 'Awesome Oscillator',
+    description: 'Difference between short and long moving averages of median price.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'shortMaLength', name: 'Short Length', type: IndicatorParameterType.Integer,
+            defaultValue: 5, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'longMaLength', name: 'Long Length', type: IndicatorParameterType.Integer,
+            defaultValue: 34, min: 1, max: 500, step: 1,
+        },
+    ],
+    outputs: [{
+        id: 'value',
+        name: 'Awesome Oscillator',
+        defaultStyle: style(IndicatorSeriesStyle.Histogram, '#00c853'),
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['ao', 'awesomeoscillator'],
+    painter: 'directional-histogram',
+    levels: [0],
+    processorFactory: (parameters) => new AwesomeOscillatorProcessor(
+        integer(parameters?.shortMaLength, 5, 1, 500, 'shortMaLength'),
+        integer(parameters?.longMaLength, 34, 1, 500, 'longMaLength'),
+    ),
+});

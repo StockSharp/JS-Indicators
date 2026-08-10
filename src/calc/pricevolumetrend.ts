@@ -1,44 +1,111 @@
-// Price Volume Trend (PVT) — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\PriceVolumeTrend.cs.
-// Deviations from .cs: none.
-//   First bar: emit null (no previous close to compute pct change).
-//   Subsequent: pvt = prevPvt + volume * (close - prevClose) / prevClose.
-//   pvt seed = 0 (per .cs Reset).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    lineStyle,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface PriceVolumeTrendCheckpoint {
+    readonly previousClose: number;
+    readonly value: number;
+}
 
-export function calcPriceVolumeTrend(candles: CandlePoint[], _params?: IndicatorParams): IndicatorPoint[] {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
+export class PriceVolumeTrendProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    PriceVolumeTrendCheckpoint
+> {
+    private previousClose = 0;
+    private current = 0;
 
-    let pvt = 0;
-    let prevClose = 0; // .cs: 0 means "not seeded yet"
+    constructor() { super(['line']); }
 
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const t = c && c.time;
-        const cl = c && c.close;
-        const v = c && c.volume;
-        const okClose = typeof cl === 'number' && Number.isFinite(cl);
-        const okVol = typeof v === 'number' && Number.isFinite(v);
-
-        if (!okClose || !okVol) {
-            out[i] = { time: t, value: null };
-            continue;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const volume = finite(input.value?.volume);
+        if (close === null || volume === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
         }
 
-        if (prevClose === 0) {
-            // Seed; .cs returns empty DecimalIndicatorValue here.
-            out[i] = { time: t, value: null };
-            prevClose = cl;
-            continue;
+        if (this.previousClose === 0) {
+            if (commit) this.previousClose = close;
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
         }
 
-        const priceChange = (cl - prevClose) / prevClose;
-        pvt += v * priceChange;
-        prevClose = cl;
-        out[i] = { time: t, value: pvt };
+        const value = finite(
+            this.current + volume * (close - this.previousClose) / this.previousClose,
+        );
+        if (commit) {
+            this.previousClose = close;
+            if (value !== null) this.current = value;
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
 
-    return out;
+    protected resetState(): void {
+        this.previousClose = 0;
+        this.current = 0;
+    }
+
+    protected captureState(): PriceVolumeTrendCheckpoint {
+        return Object.freeze({
+            previousClose: this.previousClose,
+            value: this.current,
+        });
+    }
+
+    protected restoreState(state: PriceVolumeTrendCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || finite(state.previousClose) === null || finite(state.value) === null) {
+            throw new TypeError('sschart: invalid Price Volume Trend checkpoint');
+        }
+        this.previousClose = state.previousClose;
+        this.current = state.value;
+    }
 }
+
+export const PriceVolumeTrendIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'PriceVolumeTrend',
+    name: 'Price Volume Trend',
+    description: 'Cumulative volume weighted by the relative change in closing price.',
+    category: IndicatorCategory.Volume,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{
+        id: 'line', name: 'PVT',
+        defaultStyle: lineStyle('#26c6da'),
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Volume,
+    aliases: ['pvt', 'pricevolumetrend'],
+    processorFactory: () => new PriceVolumeTrendProcessor(),
+});

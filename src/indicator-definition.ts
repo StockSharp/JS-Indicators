@@ -51,6 +51,10 @@ export type IndicatorParameters = Readonly<Record<string, IndicatorParameterValu
 
 export interface IndicatorParameterDefinition {
     readonly id: string;
+    // Other names the same knob answers to. StockSharp reaches a held indicator's setting by the
+    // path it sits on -- a Gator's jaw length is Histogram1Line1Length there -- so a chart saved
+    // against the platform names a knob we spell by its role. Both must set it.
+    readonly aliases?: readonly string[];
     readonly name: string;
     readonly description?: string;
     readonly type: IndicatorParameterType;
@@ -100,7 +104,6 @@ export const IndicatorMeasure = Object.freeze({
     Percent: 'percent',
     MinusOnePlusOne: 'minus-one-plus-one',
     Volume: 'volume',
-    Absolute: 'absolute',
 } as const);
 export type IndicatorMeasure = typeof IndicatorMeasure[keyof typeof IndicatorMeasure];
 
@@ -165,6 +168,35 @@ export interface IndicatorDefinition<
     readonly outputFactory?: IndicatorOutputFactory<TParameters>;
     readonly naturalPane: IndicatorPane;
     readonly measure: IndicatorMeasure;
+
+    /**
+     * Short names this indicator also answers to -- `sma`, `rsi`, `bb`. A search box matches on
+     * them, and a saved layout written against one keeps working. Declared here because they name
+     * this indicator and nothing else.
+     */
+    readonly aliases?: readonly string[];
+
+    /**
+     * How a host should draw this indicator, when a plain line will not do -- a band, a histogram,
+     * a pair of stochastic lines. The painter is named by the indicator because only the indicator
+     * knows what its outputs mean; a painter cannot pick itself.
+     */
+    readonly painter?: string;
+
+    /**
+     * The scale the pane should span, when the indicator has a natural one: 0..100 for an
+     * oscillator, -1..+1 for a correlation. Not derivable from `measure` -- two percent-measure
+     * indicators can want 0..100 and -100..+100 -- so it is stated rather than inferred.
+     */
+    readonly scaleRange?: { readonly min: number; readonly max: number };
+
+    /**
+     * Where a host should draw reference lines across the pane: 30 and 70 on an RSI, 20 and 80 on
+     * a stochastic. Ornament rather than arithmetic, and the numbers belong to the indicator --
+     * which is why they are here and not in whichever painter happens to draw it.
+     */
+    readonly levels?: readonly number[];
+
     readonly processorFactory: IndicatorProcessorFactory<TInput, TParameters>;
 }
 
@@ -173,6 +205,27 @@ export function resolveIndicatorOutputs<TInput, TParameters extends IndicatorPar
     parameters: TParameters,
 ): readonly IndicatorOutputDefinition[] {
     return definition.outputFactory?.(parameters) ?? definition.outputs;
+}
+
+/// Fill in a parameter given under one of its aliases, so a bag keyed the way StockSharp names its
+/// knobs reaches the indicator that spells them by role. An id given outright always wins.
+export function resolveIndicatorParameters<TInput, TParameters extends IndicatorParameters>(
+    definition: IndicatorDefinition<TInput, TParameters>,
+    parameters: TParameters,
+): TParameters {
+    let resolved: Record<string, IndicatorParameterValue> | null = null;
+    for (const parameter of definition.parameters) {
+        if (parameter.aliases === undefined) continue;
+        if (parameters !== null && parameters !== undefined && parameter.id in parameters) continue;
+        for (const alias of parameter.aliases) {
+            const value = (parameters as IndicatorParameters | undefined)?.[alias];
+            if (value === undefined) continue;
+            resolved ??= { ...parameters };
+            resolved[parameter.id] = value;
+            break;
+        }
+    }
+    return (resolved === null ? parameters : Object.freeze(resolved)) as TParameters;
 }
 
 export const CandlestickIndicatorInput: IndicatorInputSchema = Object.freeze({

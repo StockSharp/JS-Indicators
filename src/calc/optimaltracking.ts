@@ -1,118 +1,180 @@
-// Optimal Tracking (Kalman-style adaptive smoother of midprice).
-// Port of StockSharp Algo.Indicators OptimalTracking.cs.
-//
-// Constants (exact from .cs):
-//   k1 = exp(-0.25)              ≈ 0.7788007830714049
-//   k0 = 1 - k1                  ≈ 0.22119921692859512
-//
-// State per filter run:
-//   _value1Old   — last smoothed midprice-difference
-//   _value2Old   — last smoothed half-range
-//   _resultOld   — last filtered output
-//   _lambda      — tracking index (updated only when smoothRng != 0)
-//
-// Per-bar inputs:
-//   average   = (high + low) / 2
-//   halfRange = (high - low) / 2
-//
-// Per-bar logic (mirrors .cs CalcBuffer.Calculate):
-//   Bars 0 and 1 (indicator is NOT yet IsFormed — Length=2, buffer needs
-//   two pushes BEFORE IsFormed flips):
-//       _value2Old = halfRange
-//       _resultOld = average
-//       output     = average
-//   Bar 2 onward (IsFormed):
-//       avgDiff    = buff[-1] - buff[-2]    // last two midprices
-//       smoothDiff = k0 * avgDiff   + k1 * _value1Old
-//       smoothRng  = k0 * halfRange + k1 * _value2Old
-//       _value1Old = smoothDiff
-//       _value2Old = smoothRng
-//       if (smoothRng != 0)
-//           lambda = |smoothDiff / smoothRng|
-//       alpha = (-lambda² + √(lambda⁴ + 16 lambda²)) / 8
-//       result = alpha * average + (1 - alpha) * _resultOld
-//       _resultOld = result
-//       output = result
-//
-// .cs deviation notes:
-//   (a) The .cs IsFormed flips AFTER the second bar (post-Process), so the
-//       second bar still emits `average` (seed-branch). Output[2] is the
-//       first filtered value.
-//   (b) `_lambda` is per-instance state in the .cs (CalcBuffer struct
-//       field). It carries between bars; we model the same.
-//   (c) Bad bars (non-finite OHL) emit null and DO NOT advance state.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    finite,
+    integer,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export interface OptimalTrackingParameters extends IndicatorParameters {
+    readonly length: number;
+}
 
-const K1 = Math.exp(-0.25);
-const K0 = 1 - K1;
+export interface OptimalTrackingCheckpoint {
+    readonly validCount: number;
+    readonly previousAverage: number;
+    readonly previousDifference: number;
+    readonly previousHalfRange: number;
+    readonly previousResult: number;
+    readonly lambda: number;
+}
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params] Window the filter has to fill before it reports.
- * @returns {IndicatorPoint[]}
- */
-export function calcOptimalTracking(candles: CandlePoint[], params?: IndicatorParams) {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export const OPTIMAL_TRACKING_DECAY = Math.exp(-0.25);
 
-    // 2 is the constructor default, not a fixed size: Length is the seed window the filter fills
-    // before it reports. Below 2 the filtered branch would read a midprice that was never pushed.
-    const length = Math.max(2, Math.trunc(params && Number.isFinite(params.length) ? params.length : 2));
+export const OPTIMAL_TRACKING_WEIGHT = 1 - OPTIMAL_TRACKING_DECAY;
 
-    const n = candles.length;
-    const out = new Array(n);
+export class OptimalTrackingProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    OptimalTrackingCheckpoint
+> {
+    private validCount = 0;
+    private previousAverage = 0;
+    private previousDifference = 0;
+    private previousHalfRange = 0;
+    private previousResult = 0;
+    private lambda = 0;
 
-    let value1Old = 0;
-    let value2Old = 0;
-    let resultOld = 0;
-    let lambda = 0;
-    let pushedCount = 0; // mirrors Buffer.Count growth (capped at 2 effectively, but we only need the seeding gate)
-    let prevAverage: number | null = null; // mirrors buff[count-2] once IsFormed
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        if (typeof h !== 'number' || !Number.isFinite(h) ||
-            typeof l !== 'number' || !Number.isFinite(l)) {
-            // Bad bar: don't touch filter state, emit null.
-            out[i] = { time: c && c.time, value: null };
-            continue;
-        }
-
-        const average = (h + l) / 2;
-        const halfRange = (h - l) / 2;
-
-        // The .cs pushes the midprice and only then asks IsFormed, so count this bar first.
-        pushedCount++;
-        const isFormed = pushedCount >= length;
-        let result;
-
-        if (!isFormed) {
-            value2Old = halfRange;
-            resultOld = average;
-            result = average;
-        } else {
-            const avgDiff = average - prevAverage!;
-            const smoothDiff = K0 * avgDiff + K1 * value1Old;
-            const smoothRng = K0 * halfRange + K1 * value2Old;
-            value1Old = smoothDiff;
-            value2Old = smoothRng;
-            if (smoothRng !== 0) {
-                lambda = Math.abs(smoothDiff / smoothRng);
-            }
-            const l2 = lambda * lambda;
-            const alpha = (-l2 + Math.sqrt(l2 * l2 + 16 * l2)) / 8;
-            result = alpha * average + (1 - alpha) * resultOld;
-            resultOld = result;
-        }
-
-        prevAverage = average;
-        if (pushedCount > length) pushedCount = length;
-
-        // One gate for both the warm-up nulls and the seed branch, so the two cannot disagree.
-        out[i] = { time: c.time, value: isFormed ? result : null };
+    constructor(readonly length: number) {
+        super(['line']);
+        integer(length, length, 1, 500, 'length');
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        if (high === null || low === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const average = (high + low) / 2;
+        const halfRange = (high - low) / 2;
+        // The platform takes the average into its buffer and only then asks whether it is full, so
+        // the bar that fills it is already a calculated one.
+        const seen = this.validCount + 1;
+        if (seen < this.length) {
+            if (commit) {
+                this.validCount = seen;
+                this.previousAverage = average;
+                this.previousHalfRange = halfRange;
+                this.previousResult = average;
+            }
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const difference = OPTIMAL_TRACKING_WEIGHT * (average - this.previousAverage)
+            + OPTIMAL_TRACKING_DECAY * this.previousDifference;
+        const range = OPTIMAL_TRACKING_WEIGHT * halfRange
+            + OPTIMAL_TRACKING_DECAY * this.previousHalfRange;
+        const lambda = range === 0 ? this.lambda : Math.abs(difference / range);
+        const lambdaSquared = lambda * lambda;
+        const alpha = (-lambdaSquared
+            + Math.sqrt(lambdaSquared * lambdaSquared + 16 * lambdaSquared)) / 8;
+        const value = alpha * average + (1 - alpha) * this.previousResult;
+
+        if (commit) {
+            this.validCount = seen < this.length ? seen : this.length;
+            this.previousAverage = average;
+            this.previousDifference = difference;
+            this.previousHalfRange = range;
+            this.previousResult = value;
+            this.lambda = lambda;
+        }
+        return {
+            isFormed: true,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.validCount = 0;
+        this.previousAverage = 0;
+        this.previousDifference = 0;
+        this.previousHalfRange = 0;
+        this.previousResult = 0;
+        this.lambda = 0;
+    }
+
+    protected captureState(): OptimalTrackingCheckpoint {
+        return Object.freeze({
+            validCount: this.validCount,
+            previousAverage: this.previousAverage,
+            previousDifference: this.previousDifference,
+            previousHalfRange: this.previousHalfRange,
+            previousResult: this.previousResult,
+            lambda: this.lambda,
+        });
+    }
+
+    protected restoreState(state: OptimalTrackingCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || !Number.isInteger(state.validCount)
+            || state.validCount < 0 || state.validCount > this.length
+            || finite(state.previousAverage) === null
+            || finite(state.previousDifference) === null
+            || finite(state.previousHalfRange) === null
+            || finite(state.previousResult) === null
+            || finite(state.lambda) === null || state.lambda < 0) {
+            throw new TypeError('sschart: invalid Optimal Tracking checkpoint');
+        }
+        this.validCount = state.validCount;
+        this.previousAverage = state.previousAverage;
+        this.previousDifference = state.previousDifference;
+        this.previousHalfRange = state.previousHalfRange;
+        this.previousResult = state.previousResult;
+        this.lambda = state.lambda;
+    }
 }
+
+export const OptimalTrackingIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    OptimalTrackingParameters
+> = registerIndicator({
+    id: 'OptimalTracking',
+    name: 'Optimal Tracking',
+    description: 'Adaptive filter that tracks the candle midprice using its smoothed range.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 2, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{
+        id: 'line', name: 'Optimal Tracking',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#26a69a',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['optimaltracking'],
+    processorFactory: (parameters) => new OptimalTrackingProcessor(
+        integer(parameters?.length, 2, 1, 500, 'length'),
+    ),
+});

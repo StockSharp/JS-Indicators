@@ -1,7 +1,7 @@
 {
   "name": "@stocksharp/indicators",
   "version": "0.1.1",
-  "description": "StockSharp JS Indicators — ~165 technical-analysis indicators with both a batch and an incremental implementation, a machine-readable catalogue of their parameters, and a parity suite that checks the arithmetic against the C# StockSharp platform. No DOM, no dependencies.",
+  "description": "StockSharp JS Indicators — 163 technical-analysis indicators driven bar by bar, a machine-readable catalogue of their parameters, and a suite that checks them against the C# StockSharp platform. No DOM, no dependencies.",
   "license": "SEE LICENSE IN LICENSE",
   "author": {
     "name": "StockSharp Platform LLC",
@@ -43,7 +43,6 @@
       "import": "./dist/esm/index.js",
       "default": "./dist/esm/index.js"
     },
-    "./catalog.json": "./src/catalog.json",
     "./source": "./src/index.ts",
     "./package.json": "./package.json"
   },
@@ -69,6 +68,7 @@
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "api:check": "node tools/check-public-api.mjs",
     "api:update": "node tools/check-public-api.mjs --update",
+    "parity:update": "node tools/parity-update.mjs",
     "test": "npm run typecheck && npm run api:check && node build-tests.mjs && node tools/parity-dump.mjs && node --test \"tests/_dist/**/*.test.cjs\"",
     "pack:check": "npm pack --dry-run",
     "release:check": "node tools/check-release-tag.mjs",

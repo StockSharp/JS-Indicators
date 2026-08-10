@@ -73,6 +73,6 @@ const batchOnly: IndicatorDefinition = {
     parameters: [],
     outputs: [{ id: 'value', name: 'Value', defaultStyle: { series: IndicatorSeriesStyle.Line } }],
     naturalPane: IndicatorPane.Separate,
-    measure: IndicatorMeasure.Absolute,
+    measure: IndicatorMeasure.Price,
 };
 void batchOnly;

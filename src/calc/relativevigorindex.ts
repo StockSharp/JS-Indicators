@@ -1,95 +1,181 @@
-// Relative Vigor Index — JS port of
-// D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\RelativeVigorIndex.cs
-// (Average + Signal sub-indicators).
-// Average length defaults to 4 (matches `_buffer = new(4)` plus `Length =
-// _buffer.Capacity` in .cs). Signal length defaults to 4 as well (matches
-// `Length = 4` in RelativeVigorIndexSignal.cs).
-//
-// For each window of 4 candles ending at index i:
-//   num = (close-open)[i-3] + 2*(close-open)[i-2] + 2*(close-open)[i-1] + (close-open)[i]
-//   den = (high-low)[i-3]   + 2*(high-low)[i-2]   + 2*(high-low)[i-1]   + (high-low)[i]
-//   rvi[i] = den == 0 ? num/6 : num / den   (per .cs:
-//                                            `valueDn == 0 ? valueUp : valueUp/valueDn`
-//                                            where each is /6m — the /6m cancels in the
-//                                            division but stays for the den==0 fallback,
-//                                            so we apply /6 only there)
-// signal[i] = (rvi[i-3] + 2*rvi[i-2] + 2*rvi[i-1] + rvi[i]) / 6
-// Both series same length as input; null in warm-up.
-// Deviations from .cs: none — formula and weights match 1:1.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-export interface RelativeVigorIndexSeries {
-    rvi: IndicatorPoint[];
-    signal: IndicatorPoint[];
+export interface RelativeVigorIndexParameters extends IndicatorParameters {
+    readonly averageLength: number;
+    readonly signalLength: number;
 }
 
-export function calcRelativeVigorIndex(candles: CandlePoint[], params?: IndicatorParams): RelativeVigorIndexSeries {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 4;
-    const signalLength = params && Number.isFinite(params.signalLength) ? (params.signalLength | 0) : 4;
-
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { rvi: [], signal: [] };
-    }
-
-    const n = candles.length;
-    const rvi = new Array(n);
-    const signal = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const t = candles[i] && candles[i].time;
-        rvi[i] = { time: t, value: null };
-        signal[i] = { time: t, value: null };
-    }
-
-    if (length < 4 || signalLength < 4) return { rvi, signal };
-
-    // Length is .cs's buffer capacity. The formula uses exactly 4 weighted
-    // taps regardless of Length (1,2,2,1/6). We honour Length as the warm-up
-    // size matching .cs `IsFormed = buffer.Count >= Length` — first non-null
-    // RVI lands at index (length - 1).
-    const rviRaw = new Array(n);
-    for (let i = 0; i < n; i++) rviRaw[i] = null;
-
-    for (let i = length - 1; i < n; i++) {
-        const c0 = candles[i - 3];
-        const c1 = candles[i - 2];
-        const c2 = candles[i - 1];
-        const c3 = candles[i];
-        if (!finiteCandle(c0) || !finiteCandle(c1) || !finiteCandle(c2) || !finiteCandle(c3)) continue;
-
-        const up = ((c0.close - c0.open) +
-                    2 * (c1.close - c1.open) +
-                    2 * (c2.close - c2.open) +
-                    (c3.close - c3.open)) / 6;
-        const dn = ((c0.high - c0.low) +
-                    2 * (c1.high - c1.low) +
-                    2 * (c2.high - c2.low) +
-                    (c3.high - c3.low)) / 6;
-
-        rviRaw[i] = dn === 0 ? up : up / dn;
-        rvi[i] = { time: candles[i].time, value: rviRaw[i] };
-    }
-
-    // Signal: weighted SMA of last 4 RVI values with the same 1,2,2,1/6
-    // taps. signalLength is treated like .cs Length — warm-up needs
-    // `signalLength` RVI values (which already need `length - 1` candle
-    // warm-up themselves).
-    for (let i = length - 1 + signalLength - 1; i < n; i++) {
-        const v0 = rviRaw[i - 3];
-        const v1 = rviRaw[i - 2];
-        const v2 = rviRaw[i - 1];
-        const v3 = rviRaw[i];
-        if (v0 === null || v1 === null || v2 === null || v3 === null) continue;
-        signal[i] = { time: candles[i].time, value: (v0 + 2 * v1 + 2 * v2 + v3) / 6 };
-    }
-
-    return { rvi, signal };
+export interface RelativeVigorSample {
+    readonly numerator: number;
+    readonly denominator: number;
 }
 
-function finiteCandle(c: CandlePoint): boolean {
-    return c &&
-        typeof c.open === 'number' && Number.isFinite(c.open) &&
-        typeof c.high === 'number' && Number.isFinite(c.high) &&
-        typeof c.low === 'number' && Number.isFinite(c.low) &&
-        typeof c.close === 'number' && Number.isFinite(c.close);
+export interface RelativeVigorIndexCheckpoint {
+    readonly samples: RingBufferCheckpoint<RelativeVigorSample | null>;
+    readonly values: RingBufferCheckpoint<number | null>;
 }
+
+export class RelativeVigorIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RelativeVigorIndexCheckpoint
+> {
+    private readonly samples = new RingBuffer<RelativeVigorSample | null>(4);
+    private readonly values = new RingBuffer<number | null>(4);
+
+    constructor(readonly averageLength: number, readonly signalLength: number) {
+        super(['rvi', 'signal']);
+        integer(averageLength, averageLength, 4, 200, 'averageLength');
+        integer(signalLength, signalLength, 4, 100, 'signalLength');
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const open = finite(input.value?.open);
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        const numerator = open === null || close === null ? null : finite(close - open);
+        const denominator = high === null || low === null ? null : finite(high - low);
+        const sample = numerator === null || denominator === null
+            ? null
+            : Object.freeze({ numerator, denominator });
+        const rvi = input.index < this.averageLength - 1 ? null : this.weightedSample(sample);
+        const signal = input.index < this.averageLength + this.signalLength - 2
+            ? null
+            : this.weightedValue(rvi);
+        if (commit) {
+            this.samples.push(sample);
+            this.values.push(rvi);
+        }
+        return {
+            isFormed: rvi !== null,
+            values: [
+                this.output('rvi', rvi, input.index),
+                this.output('signal', signal, input.index),
+            ],
+        };
+    }
+
+    protected resetState(): void {
+        this.samples.clear();
+        this.values.clear();
+    }
+
+    protected captureState(): RelativeVigorIndexCheckpoint {
+        return Object.freeze({
+            samples: this.samples.checkpoint(),
+            values: this.values.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: RelativeVigorIndexCheckpoint): void {
+        const samples = state?.samples?.values;
+        const values = state?.values?.values;
+        if (state === null || typeof state !== 'object'
+            || !Array.isArray(samples) || samples.length > 4
+            || samples.some((sample) => sample !== null && (
+                typeof sample !== 'object'
+                || finite(sample.numerator) === null || finite(sample.denominator) === null
+            ))
+            || !Array.isArray(values) || values.length > 4
+            || values.some((value) => value !== null && finite(value) === null)) {
+            throw new TypeError('sschart: invalid Relative Vigor Index checkpoint');
+        }
+        this.samples.restore(state.samples);
+        this.values.restore(state.values);
+    }
+
+    private weightedSample(incoming: RelativeVigorSample | null): number | null {
+        if (incoming === null || this.samples.size < 3) return null;
+        const start = this.samples.size - 3;
+        const first = this.samples.at(start);
+        const second = this.samples.at(start + 1);
+        const third = this.samples.at(start + 2);
+        if (first === null || first === undefined
+            || second === null || second === undefined
+            || third === null || third === undefined) return null;
+        const numerator = (first.numerator + 2 * second.numerator
+            + 2 * third.numerator + incoming.numerator) / 6;
+        const denominator = (first.denominator + 2 * second.denominator
+            + 2 * third.denominator + incoming.denominator) / 6;
+        return finite(denominator === 0 ? numerator : numerator / denominator);
+    }
+
+    private weightedValue(incoming: number | null): number | null {
+        if (incoming === null || this.values.size < 3) return null;
+        const start = this.values.size - 3;
+        const first = this.values.at(start);
+        const second = this.values.at(start + 1);
+        const third = this.values.at(start + 2);
+        if (first === null || first === undefined
+            || second === null || second === undefined
+            || third === null || third === undefined) return null;
+        return finite((first + 2 * second + 2 * third + incoming) / 6);
+    }
+}
+
+export const RelativeVigorIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    RelativeVigorIndexParameters
+> = registerIndicator({
+    id: 'RelativeVigorIndex',
+    name: 'RVI',
+    description: 'Weighted close-open vigor relative to candle range with a signal line.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'averageLength', name: 'Average Length', type: IndicatorParameterType.Integer,
+            defaultValue: 4, min: 4, max: 200, step: 1,
+        },
+        {
+            id: 'signalLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
+            defaultValue: 4, min: 4, max: 100, step: 1,
+        },
+    ],
+    outputs: [
+        { id: 'rvi', name: 'RVI', defaultStyle: style(IndicatorSeriesStyle.Line, '#42a5f5', 2) },
+        { id: 'signal', name: 'Signal', defaultStyle: style(IndicatorSeriesStyle.Line, '#ffca28') },
+    ],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['rvi', 'relativevigorindex'],
+    painter: 'dual-line',
+    scaleRange: { min: -1, max: 1 },
+    levels: [0],
+    processorFactory: (parameters) => new RelativeVigorIndexProcessor(
+        integer(parameters?.averageLength, 4, 4, 200, 'averageLength'),
+        integer(parameters?.signalLength, 4, 4, 100, 'signalLength'),
+    ),
+});

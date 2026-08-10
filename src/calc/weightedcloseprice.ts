@@ -1,28 +1,69 @@
-// Weighted Close Price —
-// JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\WeightedClosePrice.cs.
-// wcp[i] = (high + low + 2*close) / 4. Per-candle, no warm-up.
-//
-// Deviations from .cs: none.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    PRICE_LINE_STYLE,
+} from './shared/cumulative-price.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class WeightedClosePriceProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    null
+> {
+    constructor() { super(['line']); }
 
-/**
- * @returns {IndicatorPoint[]}
- */
-export function calcWeightedClosePrice(candles: CandlePoint[], _params?: IndicatorParams) {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high, l = c && c.low, cl = c && c.close;
-        if (typeof h !== 'number' || !Number.isFinite(h) ||
-            typeof l !== 'number' || !Number.isFinite(l) ||
-            typeof cl !== 'number' || !Number.isFinite(cl)) {
-            out[i] = { time: c.time, value: null };
-        } else {
-            out[i] = { time: c.time, value: (h + l + 2 * cl) / 4 };
-        }
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        _commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        const value = high === null || low === null || close === null
+            ? null
+            : (high + low + 2 * close) / 4;
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
+
+    protected resetState(): void { /* stateless */ }
+    protected captureState(): null { return null; }
+    protected restoreState(state: null): void {
+        if (state !== null)
+            throw new TypeError('sschart: invalid Weighted Close Price checkpoint');
+    }
 }
+
+export const WeightedClosePriceIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'WeightedClosePrice',
+    name: 'Weighted Close Price',
+    description: 'Per-candle average of high, low and a double-weighted close.',
+    category: IndicatorCategory.Price,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{ id: 'line', name: 'Weighted Close', defaultStyle: PRICE_LINE_STYLE }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['wcp', 'weightedcloseprice'],
+    processorFactory: () => new WeightedClosePriceProcessor(),
+});

@@ -1,81 +1,93 @@
-// Pivot Points (classic / floor-trader style).
-// Port of StockSharp Algo.Indicators PivotPoints.cs.
-//
-// Per-candle formulas (using the just-closed candle's HLC):
-//   pivot = (H + L + C) / 3                  // typical price
-//   range = H - L                            // candle.GetLength()
-//   R1    = 2*pivot - L
-//   R2    = pivot + range
-//   S1    = 2*pivot - H
-//   S2    = pivot - range
-//
-// No warm-up: every bar emits a complete set of five levels from its own
-// HLC. (Many charting packages use *previous* bar's HLC and hold the
-// levels flat through the next bar — but StockSharp's PivotPoints.cs
-// computes from the CURRENT candle, no shift. We mirror that.)
-//
-// Output shape (multi-output, mirrors PivotPointsValue.cs):
-//   { pp: IndicatorPoint[], r1: IndicatorPoint[], r2: IndicatorPoint[],
-//     s1: IndicatorPoint[], s2: IndicatorPoint[] }
-// All five arrays are aligned 1:1 with input candles.
-//
-// .cs deviation notes:
-//   (a) The .cs is a BaseComplexIndicator with five PivotPointPart inner
-//       indicators (each just a pass-through). We don't need that scaffold
-//       for the calc layer — we emit the five series directly.
-//   (b) Bad bars (non-finite H/L/C) emit null on all five outputs for that
-//       slot.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export class PivotPointsProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    null
+> {
+    constructor() { super(['pp', 'r1', 'r2', 's1', 's2']); }
 
-export interface PivotPointsSeries {
-    pp: IndicatorPoint[];
-    r1: IndicatorPoint[];
-    r2: IndicatorPoint[];
-    s1: IndicatorPoint[];
-    s2: IndicatorPoint[];
-}
-
-/** `_params` has no tunables — it is accepted only for registry uniformity. */
-export function calcPivotPoints(candles: CandlePoint[], _params?: IndicatorParams): PivotPointsSeries {
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { pp: [], r1: [], r2: [], s1: [], s2: [] };
-    }
-
-    const n = candles.length;
-    const pp = new Array(n);
-    const r1 = new Array(n);
-    const r2 = new Array(n);
-    const s1 = new Array(n);
-    const s2 = new Array(n);
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const t = c && c.time;
-        const h = c && c.high;
-        const l = c && c.low;
-        const cl = c && c.close;
-
-        if (typeof h !== 'number' || !Number.isFinite(h) ||
-            typeof l !== 'number' || !Number.isFinite(l) ||
-            typeof cl !== 'number' || !Number.isFinite(cl)) {
-            pp[i] = { time: t, value: null };
-            r1[i] = { time: t, value: null };
-            r2[i] = { time: t, value: null };
-            s1[i] = { time: t, value: null };
-            s2[i] = { time: t, value: null };
-            continue;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        _commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        if (high === null || low === null || close === null) {
+            return {
+                isFormed: false,
+                values: [
+                    this.output('pp', null, input.index),
+                    this.output('r1', null, input.index),
+                    this.output('r2', null, input.index),
+                    this.output('s1', null, input.index),
+                    this.output('s2', null, input.index),
+                ],
+            };
         }
 
-        const pivot = (h + l + cl) / 3;
-        const range = h - l;
-
-        pp[i] = { time: t, value: pivot };
-        r1[i] = { time: t, value: 2 * pivot - l };
-        r2[i] = { time: t, value: pivot + range };
-        s1[i] = { time: t, value: 2 * pivot - h };
-        s2[i] = { time: t, value: pivot - range };
+        const pivot = (high + low + close) / 3;
+        const range = high - low;
+        return {
+            isFormed: true,
+            values: [
+                this.output('pp', pivot, input.index),
+                this.output('r1', 2 * pivot - low, input.index),
+                this.output('r2', pivot + range, input.index),
+                this.output('s1', 2 * pivot - high, input.index),
+                this.output('s2', pivot - range, input.index),
+            ],
+        };
     }
 
-    return { pp, r1, r2, s1, s2 };
+    protected resetState(): void { /* stateless */ }
+    protected captureState(): null { return null; }
+    protected restoreState(state: null): void {
+        if (state !== null) throw new TypeError('sschart: invalid Pivot Points checkpoint');
+    }
 }
+
+export const PivotPointsIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'PivotPoints',
+    name: 'Pivot Points',
+    description: 'Classic pivot, resistance and support levels calculated from each candle.',
+    category: IndicatorCategory.SupportResistance,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [
+        { id: 'pp', name: 'Pivot Point', defaultStyle: style(IndicatorSeriesStyle.Line, '#ffca28', 2) },
+        { id: 'r1', name: 'Resistance 1', defaultStyle: style(IndicatorSeriesStyle.Line, '#ef5350') },
+        { id: 'r2', name: 'Resistance 2', defaultStyle: style(IndicatorSeriesStyle.Line, '#e53935') },
+        { id: 's1', name: 'Support 1', defaultStyle: style(IndicatorSeriesStyle.Line, '#66bb6a') },
+        { id: 's2', name: 'Support 2', defaultStyle: style(IndicatorSeriesStyle.Line, '#43a047') },
+    ],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+    aliases: ['pivotpoints'],
+    processorFactory: () => new PivotPointsProcessor(),
+});

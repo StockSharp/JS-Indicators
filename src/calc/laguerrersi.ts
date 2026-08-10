@@ -1,78 +1,176 @@
-// Laguerre RSI (Algo.Indicators/LaguerreRSI.cs).
-// Four-stage Laguerre filter chained off the candle close, then an RSI-style
-// up/down accumulator across the four filter stages, smoothed by the same
-// gamma. Output ranges 0..100.
-//
-// .cs state: l0, l1, l2, l3 (filter stages) and prevCU, prevCD (smoothed
-// up/down). Single parameter: Gamma ∈ (0, 1), default 0.7.
-//
-// Per-bar update (verbatim from .cs):
-//   l0 = (1 - gamma) * price + gamma * l0_prev
-//   l1 = -gamma * l0 + l0_prev + gamma * l1_prev
-//   l2 = -gamma * l1 + l1_prev + gamma * l2_prev
-//   l3 = -gamma * l2 + l2_prev + gamma * l3_prev
-//
-//   cu = 0; cd = 0
-//   if l0 >= l1: cu += l0 - l1 else cd += l1 - l0
-//   if l1 >= l2: cu += l1 - l2 else cd += l2 - l1
-//   if l2 >= l3: cu += l2 - l3 else cd += l3 - l2
-//
-//   smoothCU = (1 - gamma) * cu + gamma * prevCU
-//   smoothCD = (1 - gamma) * cd + gamma * prevCD
-//
-//   lrsi = (smoothCU + smoothCD) != 0 ? smoothCU / (smoothCU + smoothCD) * 100 : 50
-//
-// .cs sets IsFormed = true on the FIRST final input, so there is no warm-up
-// — every candle emits a value starting from index 0. We mirror that
-// behaviour: no null padding at the head.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    parameter,
+} from './shared/adaptive.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface LaguerreRsiParameters extends IndicatorParameters {
+    readonly gamma: number;
+}
 
-export function calcLaguerreRSI(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
+export interface LaguerreRsiCheckpoint {
+    readonly l0: number;
+    readonly l1: number;
+    readonly l2: number;
+    readonly l3: number;
+    readonly previousUp: number;
+    readonly previousDown: number;
+    readonly formed: boolean;
+}
 
-    let gamma = params && Number.isFinite(params.gamma) ? +params.gamma : 0.7;
-    // Match the .cs Range(0.000001, 0.999999): clamp without throwing — JS
-    // indicator calculators are best-effort.
-    if (!(gamma > 0 && gamma < 1)) gamma = 0.7;
+export class LaguerreRsiProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    LaguerreRsiCheckpoint
+> {
+    private l0 = 0;
+    private l1 = 0;
+    private l2 = 0;
+    private l3 = 0;
+    private previousUp = 0;
+    private previousDown = 0;
+    private formed = false;
 
-    const gamma1 = 1 - gamma;
-
-    let l0 = 0, l1 = 0, l2 = 0, l3 = 0;
-    let prevCU = 0, prevCD = 0;
-
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const price = candles[i] && candles[i].close;
-        if (typeof price !== 'number' || !Number.isFinite(price)) {
-            // Hold state, emit null for the gap.
-            out[i] = { time: candles[i].time, value: null };
-            continue;
-        }
-
-        const newL0 = gamma1 * price + gamma * l0;
-        const newL1 = -gamma * newL0 + l0 + gamma * l1;
-        const newL2 = -gamma * newL1 + l1 + gamma * l2;
-        const newL3 = -gamma * newL2 + l2 + gamma * l3;
-
-        let cu = 0, cd = 0;
-        if (newL0 >= newL1) cu += newL0 - newL1; else cd += newL1 - newL0;
-        if (newL1 >= newL2) cu += newL1 - newL2; else cd += newL2 - newL1;
-        if (newL2 >= newL3) cu += newL2 - newL3; else cd += newL3 - newL2;
-
-        const smoothCU = gamma1 * cu + gamma * prevCU;
-        const smoothCD = gamma1 * cd + gamma * prevCD;
-
-        const denom = smoothCU + smoothCD;
-        const lrsi = denom !== 0 ? (smoothCU / denom) * 100 : 50;
-
-        out[i] = { time: candles[i].time, value: lrsi };
-
-        // Commit state — equivalent to .cs `if (input.IsFinal) { ... }`.
-        l0 = newL0; l1 = newL1; l2 = newL2; l3 = newL3;
-        prevCU = smoothCU; prevCD = smoothCD;
+    constructor(readonly gamma: number) {
+        super(['line']);
+        parameter(gamma, gamma, 0.000001, 0.999999, 'gamma');
     }
 
-    return out;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const price = finite(input.value?.close);
+        if (price === null) {
+            return {
+                isFormed: this.formed,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const complement = 1 - this.gamma;
+        const l0 = complement * price + this.gamma * this.l0;
+        const l1 = -this.gamma * l0 + this.l0 + this.gamma * this.l1;
+        const l2 = -this.gamma * l1 + this.l1 + this.gamma * this.l2;
+        const l3 = -this.gamma * l2 + this.l2 + this.gamma * this.l3;
+
+        let up = 0;
+        let down = 0;
+        if (l0 >= l1) up += l0 - l1;
+        else down += l1 - l0;
+        if (l1 >= l2) up += l1 - l2;
+        else down += l2 - l1;
+        if (l2 >= l3) up += l2 - l3;
+        else down += l3 - l2;
+
+        const smoothedUp = complement * up + this.gamma * this.previousUp;
+        const smoothedDown = complement * down + this.gamma * this.previousDown;
+        const total = smoothedUp + smoothedDown;
+        const value = total === 0 ? 50 : smoothedUp / total * 100;
+        const formed = this.formed || commit;
+
+        if (commit) {
+            this.l0 = l0;
+            this.l1 = l1;
+            this.l2 = l2;
+            this.l3 = l3;
+            this.previousUp = smoothedUp;
+            this.previousDown = smoothedDown;
+            this.formed = true;
+        }
+        return {
+            isFormed: formed,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.l0 = 0;
+        this.l1 = 0;
+        this.l2 = 0;
+        this.l3 = 0;
+        this.previousUp = 0;
+        this.previousDown = 0;
+        this.formed = false;
+    }
+
+    protected captureState(): LaguerreRsiCheckpoint {
+        return Object.freeze({
+            l0: this.l0,
+            l1: this.l1,
+            l2: this.l2,
+            l3: this.l3,
+            previousUp: this.previousUp,
+            previousDown: this.previousDown,
+            formed: this.formed,
+        });
+    }
+
+    protected restoreState(state: LaguerreRsiCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || finite(state.l0) === null || finite(state.l1) === null
+            || finite(state.l2) === null || finite(state.l3) === null
+            || finite(state.previousUp) === null || state.previousUp < 0
+            || finite(state.previousDown) === null || state.previousDown < 0
+            || typeof state.formed !== 'boolean') {
+            throw new TypeError('sschart: invalid Laguerre RSI checkpoint');
+        }
+        this.l0 = state.l0;
+        this.l1 = state.l1;
+        this.l2 = state.l2;
+        this.l3 = state.l3;
+        this.previousUp = state.previousUp;
+        this.previousDown = state.previousDown;
+        this.formed = state.formed;
+    }
 }
+
+export const LaguerreRsiIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LaguerreRsiParameters
+> = registerIndicator({
+    id: 'LaguerreRSI',
+    name: 'Laguerre RSI',
+    description: 'RSI-style oscillator calculated from a four-stage Laguerre filter.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'gamma', name: 'Gamma', type: IndicatorParameterType.Number,
+        defaultValue: 0.7, min: 0.000001, max: 0.999999, step: 0.001,
+    }],
+    outputs: [{
+        id: 'line', name: 'Laguerre RSI',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#7e57c2',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+
+    aliases: ['laguerrersi'],
+    scaleRange: { min: 0, max: 100 },
+    levels: [20, 80],
+    processorFactory: (parameters) => new LaguerreRsiProcessor(
+        parameter(parameters?.gamma, 0.7, 0.000001, 0.999999, 'gamma'),
+    ),
+});

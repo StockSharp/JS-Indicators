@@ -1,52 +1,102 @@
-// Envelope — SMA of close with constant percentage upper/lower bands.
-//   middle[i] = SMA(close, length)
-//   upper[i]  = middle[i] * (1 + percent/100)
-//   lower[i]  = middle[i] * (1 - percent/100)
-// Same shape as BollingerBands so the renderer's
-// `case 'BollingerBands' | 'Envelope'` branch can consume
-// `data.upper / middle / lower` uniformly. `percent` defaults to 1.0
-// (meaning ±1%).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-import { simpleMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-interface EnvelopeSeries {
-    upper: IndicatorPoint[];
-    middle: IndicatorPoint[];
-    lower: IndicatorPoint[];
+export interface EnvelopeParameters extends IndicatorParameters {
+    readonly length: number;
+    readonly shift: number;
 }
 
-export function calcEnvelope(candles: CandlePoint[], params?: IndicatorParams): EnvelopeSeries {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 20;
-    const percent = params && Number.isFinite(params.percent) ? +params.percent : 1.0;
+export class EnvelopeProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly average: SimpleMovingAverage;
 
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { upper: [], middle: [], lower: [] };
+    constructor(readonly length: number, readonly shift: number) {
+        super(['upper', 'middle', 'lower']);
+        this.average = new SimpleMovingAverage(length);
+        number(shift, 0.01, 0, 100, 'shift');
     }
 
-    const n = candles.length;
-    const closes = new Array(n);
-    for (let i = 0; i < n; i++) closes[i] = candles[i] && candles[i].close;
-
-    const mid = simpleMA(closes, length);
-    const upper = new Array(n);
-    const middle = new Array(n);
-    const lower = new Array(n);
-    const k = percent / 100;
-
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        const m = mid[i];
-        if (m === null) {
-            upper[i] = { time: t, value: null };
-            middle[i] = { time: t, value: null };
-            lower[i] = { time: t, value: null };
-            continue;
-        }
-        middle[i] = { time: t, value: m };
-        upper[i] = { time: t, value: m * (1 + k) };
-        lower[i] = { time: t, value: m * (1 - k) };
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const middle = commit ? this.average.push(close) : this.average.preview(close);
+        return {
+            isFormed: middle !== null,
+            values: [
+                this.output('upper', middle === null ? null : middle * (1 + this.shift), input.index),
+                this.output('middle', middle, input.index),
+                this.output('lower', middle === null ? null : middle * (1 - this.shift), input.index),
+            ],
+        };
     }
 
-    return { upper, middle, lower };
+    protected resetState(): void { this.average.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.average.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void { this.average.restore(state); }
 }
+
+export const EnvelopeIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    EnvelopeParameters
+> = registerIndicator({
+    id: 'Envelope',
+    name: 'Envelope',
+    description: 'Simple moving average with fixed percentage upper and lower bands.',
+    category: IndicatorCategory.Volatility,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+            defaultValue: 32, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'shift', name: 'Shift', type: IndicatorParameterType.Number,
+            defaultValue: 0.01, min: 0, max: 100, step: 0.0001,
+        },
+    ],
+    outputs: [
+        { id: 'upper', name: 'Upper', defaultStyle: style(IndicatorSeriesStyle.Band, '#26a69a') },
+        { id: 'middle', name: 'Middle', defaultStyle: style(IndicatorSeriesStyle.Line, '#ffca28', 2) },
+        { id: 'lower', name: 'Lower', defaultStyle: style(IndicatorSeriesStyle.Band, '#26a69a') },
+    ],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+    aliases: ['envelope'],
+    painter: 'band',
+    processorFactory: (parameters) => new EnvelopeProcessor(
+        integer(parameters?.length, 32, 1, 500, 'length'),
+        number(parameters?.shift, 0.01, 0, 100, 'shift'),
+    ),
+});

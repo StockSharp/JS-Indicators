@@ -17,7 +17,5 @@ export * from './indicator-source.js';
 export * from './indicator-output-style.js';
 export * from './indicator-taxonomy.js';
 export * from './math/index.js';
-export * from './built-ins/index.js';
-
 export * from './calc/index.js';
-export type { CandlePoint, IndicatorLines, IndicatorParams, IndicatorPoint } from './calc/types.js';
+export * from './indicator-catalog.js';

@@ -1,38 +1,55 @@
-// Wilder Moving Average — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\WilderMovingAverage.cs.
-// Welles Wilder smoothing, same formula as SMMA:
-//   seed:        wma[length-1] = mean(close[0..length-1])
-//   subsequent:  wma[i] = (wma[i-1] * (length-1) + close[i]) / length
-// Default Length = 32 (matches .cs ctor). First (length-1) outputs are null.
-//
-// Implementation reuses helpers.wilderMA (the same kernel that drives
-// smma.js / rsi.js / adx.js).
-//
-// Deviations from .cs: none.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    WilderMovingAverage,
+} from '../math/index.js';
+import {
+    LENGTH_STYLE,
+    LengthIndicatorParameters,
+    SmoothedMovingAverageProcessor,
+    resolvedLength,
+} from './shared/core.js';
 
-import { wilderMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
+/** Public Wilder indicator shares the same seeded recursion as batch SMMA. */
+export class WilderMovingAverageProcessor extends SmoothedMovingAverageProcessor {}
 
-/**
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcWilderMovingAverage(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 32;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export const WilderMovingAverageIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LengthIndicatorParameters
+> = registerIndicator({
+    id: 'WilderMovingAverage',
+    name: 'Wilder Moving Average',
+    description: 'Welles Wilder moving average seeded by a full-window mean.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length',
+        name: 'Length',
+        description: 'Seed window and recursive smoothing length.',
+        type: IndicatorParameterType.Integer,
+        defaultValue: 32,
+        min: 1,
+        max: 500,
+        step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'Wilder MA',
+        defaultStyle: { ...LENGTH_STYLE, color: '#ef5350' },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
 
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
-
-    const closes = new Array(n);
-    for (let i = 0; i < n; i++) closes[i] = candles[i] && candles[i].close;
-
-    const smoothed = wilderMA(closes, length);
-    for (let i = 0; i < n; i++) {
-        if (smoothed[i] !== null && smoothed[i] !== undefined) {
-            out[i] = { time: candles[i].time, value: smoothed[i] };
-        }
-    }
-    return out;
-}
+    aliases: ['wilderma', 'wildermovingaverage'],
+    processorFactory: (parameters) => new WilderMovingAverageProcessor(
+        resolvedLength(parameters, 32, 1),
+    ),
+});

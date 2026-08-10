@@ -25,6 +25,22 @@ export function loadDumpStatus() {
     return JSON.parse(readFileSync(file, 'utf8'));
 }
 
+/**
+ * Refuse to run a parity test that cannot reach the platform.
+ *
+ * This used to be `t.skip(reason)`, which reads as a pass: on CI, where the sibling StockSharp
+ * checkout is absent, ten of the twelve parity tests skipped and the job exited 0 -- including the
+ * job that publishes. A suite that cannot compare against the platform has not compared against the
+ * platform, and it should say so in the colour that gets read.
+ */
+export function requireDump(status) {
+    if (status.available) return;
+    throw new Error(
+        `parity cannot run: ${status.reason}. The comparison needs the StockSharp checkout named in ` +
+        'tools/csharp-catalog/csharp-catalog.csproj and a .NET SDK. This is a failure rather than a ' +
+        'skip on purpose: a skipped parity test is a green tick over an unverified port.');
+}
+
 export function readDump(name) {
     return JSON.parse(readFileSync(join(cacheDir, name), 'utf8'));
 }

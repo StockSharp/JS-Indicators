@@ -1,56 +1,80 @@
-// Bull Power (Alexander Elder).
-// Port of StockSharp Algo.Indicators BullPower.cs — symmetric to BearPower:
-//   BullPower[i] = high[i] - EMA(close, length)[i]
-// `length` default 13. EMA is seeded with SMA over the first `length` closes
-// (same convention as ema.js / calcEMA). First (length-1) outputs are null.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    ExponentialMovingAverage,
+    type SeededMovingAverageCheckpoint,
+} from '../math/index.js';
+import {
+    RangeLengthParameters,
+    lineStyle,
+} from './shared/range.js';
+import {
+    finite,
+    length,
+    number,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class BullPowerProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    SeededMovingAverageCheckpoint
+> {
+    private readonly average: ExponentialMovingAverage;
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcBullPower(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 13;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (length <= 0 || n < length) return out;
-
-    let seedSum = 0;
-    let seedOk = true;
-    for (let i = 0; i < length; i++) {
-        const c = candles[i] && candles[i].close;
-        if (typeof c !== 'number' || !Number.isFinite(c)) seedOk = false;
-        else seedSum += c;
+    constructor(readonly length: number) {
+        super(['line']);
+        this.average = new ExponentialMovingAverage(length);
     }
-    if (!seedOk) return out;
 
-    const k = 2 / (length + 1);
-    let ema = seedSum / length;
-
-    const hiSeed = candles[length - 1] && candles[length - 1].high;
-    if (typeof hiSeed === 'number' && Number.isFinite(hiSeed)) {
-        out[length - 1] = { time: candles[length - 1].time, value: hiSeed - ema };
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const high = finite(input.value?.high);
+        const average = commit ? this.average.push(close) : this.average.preview(close);
+        const value = average === null || high === null ? null : high - average;
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
 
-    for (let i = length; i < n; i++) {
-        const c = candles[i] && candles[i].close;
-        const hi = candles[i] && candles[i].high;
-        if (typeof c !== 'number' || !Number.isFinite(c)) {
-            out[i] = { time: candles[i].time, value: null };
-            continue;
-        }
-        ema = c * k + ema * (1 - k);
-        if (typeof hi === 'number' && Number.isFinite(hi)) {
-            out[i] = { time: candles[i].time, value: hi - ema };
-        } else {
-            out[i] = { time: candles[i].time, value: null };
-        }
-    }
-    return out;
+    protected resetState(): void { this.average.reset(); }
+    protected captureState(): SeededMovingAverageCheckpoint { return this.average.checkpoint(); }
+    protected restoreState(state: SeededMovingAverageCheckpoint): void { this.average.restore(state); }
 }
+
+export const BullPowerIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    RangeLengthParameters
+> = registerIndicator({
+    id: 'BullPower',
+    name: 'Bull Power',
+    description: 'Candle high minus the seeded exponential average of closing prices.',
+    category: IndicatorCategory.MarketStrength,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 32, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{ id: 'line', name: 'Bull Power', defaultStyle: lineStyle('#26a69a') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+
+    aliases: ['bullpower'],
+    levels: [0],
+    processorFactory: (parameters) => new BullPowerProcessor(length(parameters?.length, 13)),
+});

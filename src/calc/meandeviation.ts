@@ -1,54 +1,89 @@
-// Mean Deviation (Average Absolute Deviation).
-// Port of StockSharp Algo.Indicators MeanDeviation.cs.
-//
-// For each fully-formed window of `length` final closes:
-//   sma  = (1/length) * Σ close[i-length+1 .. i]
-//   md   = (1/length) * Σ |close[k] - sma|     // same window
-// The .cs uses the running SMA from an inner SimpleMovingAverage, plus a
-// circular `Buffer` of the last `length` closes; `IsFormed` flips on once
-// the SMA is formed, i.e. when `length` final samples have arrived.
-//
-// .cs note: the non-final branch (`input.IsFinal == false`) replaces the
-// oldest sample in the abs-sum with the in-progress value. We're a batch
-// closed-bar calculator (the chart re-feeds the whole array on each tick),
-// so we treat every input bar as final — matches what the .cs would emit
-// once that bar closes.
-// Default length: 5 (matches the .cs ctor).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMeanDeviation,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    LENGTH_STYLE,
+    LengthIndicatorParameters,
+    close,
+    resolvedLength,
+} from './shared/core.js';
 
-import { simpleMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class MeanDeviationProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly deviation: RollingMeanDeviation;
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcMeanDeviation(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 5;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
-
-    const closes = new Array(n);
-    for (let i = 0; i < n; i++) closes[i] = candles[i] && candles[i].close;
-    const sma = simpleMA(closes, length);
-
-    for (let i = length - 1; i < n; i++) {
-        const m = sma[i];
-        if (m === null) continue;
-        let sum = 0;
-        let ok = true;
-        for (let k = 0; k < length; k++) {
-            const c = closes[i - length + 1 + k];
-            if (typeof c !== 'number' || !Number.isFinite(c)) { ok = false; break; }
-            const d = c - m;
-            sum += d < 0 ? -d : d;
-        }
-        if (!ok) continue;
-        out[i] = { time: candles[i].time, value: sum / length };
+    constructor(readonly length: number) {
+        super(['line']);
+        this.deviation = new RollingMeanDeviation(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const value = commit
+            ? this.deviation.push(close(input))
+            : this.deviation.preview(close(input));
+        return {
+            isFormed: this.deviation.isFormed || value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.deviation.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.deviation.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void {
+        this.deviation.restore(state);
+    }
 }
+
+export const MeanDeviationIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LengthIndicatorParameters
+> = registerIndicator({
+    id: 'MeanDeviation',
+    name: 'Mean Deviation',
+    description: 'Mean absolute deviation from the mean of a rolling close-price window.',
+    category: IndicatorCategory.Volatility,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length',
+        name: 'Length',
+        description: 'Number of closing prices in the deviation window.',
+        type: IndicatorParameterType.Integer,
+        defaultValue: 5,
+        min: 1,
+        max: 500,
+        step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'Mean Deviation',
+        defaultStyle: { ...LENGTH_STYLE, color: '#7e57c2' },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+
+    aliases: ['meandeviation'],
+    processorFactory: (parameters) => new MeanDeviationProcessor(
+        resolvedLength(parameters, 5, 1),
+    ),
+});

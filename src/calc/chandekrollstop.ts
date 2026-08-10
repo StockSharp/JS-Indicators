@@ -1,105 +1,179 @@
-// Chande Kroll Stop — adaptive long/short trailing stops.
-// Port of StockSharp Algo.Indicators ChandeKrollStop.cs:
-//
-//   highest    = rolling max(high) over Period bars
-//   lowest     = rolling min(low)  over Period bars
-//   stopLong   = highest - (highest - lowest) * Multiplier
-//   stopShort  = lowest  + (highest - lowest) * Multiplier
-//   longStop   = SMA(stopLong, StopPeriod)
-//   shortStop  = SMA(stopShort, StopPeriod)
-//
-// Defaults: Period=10, Multiplier=1.5, StopPeriod=9.
-//
-// Warm-up: Highest/Lowest form at bar Period-1, and the .cs Adds (and dumps)
-// the SMA lines gated on Highest/Lowest.IsFormed — NOT on the SMA's own formed
-// flag. The inner SMA is a SimpleMovingAverage (partial-seed: Buffer.Sum /
-// StopPeriod from its first input), so the output is non-null from bar
-// Period-1 with a growing partial-seed average, becoming a true windowed SMA at
-// bar (Period-1)+(StopPeriod-1). We reproduce that with partialSeedSMA.
-//
-// Output shape: { longStop, shortStop }, each IndicatorPoint[] aligned
-// 1:1 with input candles.
-//
-// Uses partialSeedSMA (helpers) for the StopPeriod smoothing.
-//
-// .cs deviation: the .cs labels the result entries as `Highest` and
-// `Lowest` (the inner indicator keys), but the VALUES stored there are
-// the SMA of stopLong / stopShort respectively. We name them more
-// intuitively here (`longStop` / `shortStop`) to match common Chande
-// Kroll documentation, while keeping the formula identical.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    PartialSeedSimpleMovingAverage,
+    RollingMaximum,
+    RollingMinimum,
+    type RingBufferCheckpoint,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    lineStyle,
+} from './shared/range.js';
+import {
+    finite,
+    length,
+    number,
+} from './shared/guards.js';
 
-import { partialSeedSMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-/**
- * @typedef {{longStop: IndicatorPoint[], shortStop: IndicatorPoint[]}} ChandeKrollStopSeries
- */
-
-/**
- * @param {CandlePoint[]} candles
- * @param {{period?: number, multiplier?: number, stopPeriod?: number}} [params]
- * @returns {ChandeKrollStopSeries}
- */
-export function calcChandeKrollStop(
-    candles: CandlePoint[],
-    params?: IndicatorParams,
-): { longStop: IndicatorPoint[]; shortStop: IndicatorPoint[] } {
-    const period = params && Number.isFinite(params.period) ? (params.period | 0) : 10;
-    const multiplier = params && Number.isFinite(params.multiplier) ? +params.multiplier : 1.5;
-    const stopPeriod = params && Number.isFinite(params.stopPeriod) ? (params.stopPeriod | 0) : 9;
-
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { longStop: [], shortStop: [] };
-    }
-
-    const n = candles.length;
-    const longStop = new Array(n);
-    const shortStop = new Array(n);
-    for (let i = 0; i < n; i++) {
-        longStop[i] = { time: candles[i].time, value: null };
-        shortStop[i] = { time: candles[i].time, value: null };
-    }
-
-    if (period <= 0 || stopPeriod <= 0) return { longStop, shortStop };
-
-    // Rolling Highest(high) and Lowest(low) over the trailing `period` bars.
-    // Compute stopLong/stopShort series, then SMA-smooth them.
-    const stopLongs = new Array(n);
-    const stopShorts = new Array(n);
-    for (let i = 0; i < n; i++) { stopLongs[i] = NaN; stopShorts[i] = NaN; }
-
-    for (let i = period - 1; i < n; i++) {
-        let maxH = -Infinity;
-        let minL = +Infinity;
-        let bad = false;
-        for (let j = i - period + 1; j <= i; j++) {
-            const c = candles[j];
-            const h = c && c.high;
-            const l = c && c.low;
-            if (typeof h !== 'number' || !Number.isFinite(h) ||
-                typeof l !== 'number' || !Number.isFinite(l)) { bad = true; break; }
-            if (h > maxH) maxH = h;
-            if (l < minL) minL = l;
-        }
-        if (bad) continue;
-        const diff = maxH - minL;
-        stopLongs[i] = maxH - diff * multiplier;
-        stopShorts[i] = minL + diff * multiplier;
-    }
-
-    // Partial-seed SMA (SimpleMovingAverage.cs: Buffer.Sum / StopPeriod) over
-    // the stopLong/stopShort streams. Since these are NaN before bar period-1,
-    // partialSeedSMA skips them without advancing the buffer, so the first
-    // finite sample is at bar period-1 and the output is non-null (a growing
-    // partial-seed average) from there — matching the .cs gate on
-    // Highest/Lowest.IsFormed rather than on the SMA's own formed flag.
-    const smaLong = partialSeedSMA(stopLongs, stopPeriod);
-    const smaShort = partialSeedSMA(stopShorts, stopPeriod);
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        if (smaLong[i] !== null) longStop[i] = { time: t, value: smaLong[i] };
-        if (smaShort[i] !== null) shortStop[i] = { time: t, value: smaShort[i] };
-    }
-
-    return { longStop, shortStop };
+export interface ChandeKrollStopParameters extends IndicatorParameters {
+    readonly period: number;
+    readonly multiplier: number;
+    readonly stopPeriod: number;
 }
+
+export interface ChandeKrollStopCheckpoint {
+    readonly highest: RollingWindowCheckpoint;
+    readonly lowest: RollingWindowCheckpoint;
+    readonly longAverage: RingBufferCheckpoint<number>;
+    readonly shortAverage: RingBufferCheckpoint<number>;
+}
+
+export class ChandeKrollStopProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    ChandeKrollStopCheckpoint
+> {
+    private readonly highest: RollingMaximum;
+    private readonly lowest: RollingMinimum;
+    private readonly longAverage: PartialSeedSimpleMovingAverage;
+    private readonly shortAverage: PartialSeedSimpleMovingAverage;
+
+    constructor(
+        readonly period: number,
+        readonly multiplier: number,
+        readonly stopPeriod: number,
+    ) {
+        super(['longStop', 'shortStop']);
+        length(period, period);
+        number(multiplier, multiplier, 0.001, 30, 'multiplier');
+        length(stopPeriod, stopPeriod);
+        this.highest = new RollingMaximum(period);
+        this.lowest = new RollingMinimum(period);
+        this.longAverage = new PartialSeedSimpleMovingAverage(stopPeriod);
+        this.shortAverage = new PartialSeedSimpleMovingAverage(stopPeriod);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const highest = commit ? this.highest.push(high) : this.highest.preview(high);
+        const lowest = commit ? this.lowest.push(low) : this.lowest.preview(low);
+        if (highest === null || lowest === null) {
+            return {
+                isFormed: false,
+                values: [
+                    this.output('longStop', null, input.index),
+                    this.output('shortStop', null, input.index),
+                ],
+            };
+        }
+
+        const difference = highest - lowest;
+        const rawLong = highest - difference * this.multiplier;
+        const rawShort = lowest + difference * this.multiplier;
+        const longStop = commit
+            ? this.longAverage.push(rawLong)
+            : this.longAverage.preview(rawLong);
+        const shortStop = commit
+            ? this.shortAverage.push(rawShort)
+            : this.shortAverage.preview(rawShort);
+        const formed = longStop !== null && shortStop !== null;
+        return {
+            isFormed: formed,
+            values: [
+                this.output('longStop', formed ? longStop : null, input.index),
+                this.output('shortStop', formed ? shortStop : null, input.index),
+            ],
+        };
+    }
+
+    protected resetState(): void {
+        this.highest.reset();
+        this.lowest.reset();
+        this.longAverage.reset();
+        this.shortAverage.reset();
+    }
+
+    protected captureState(): ChandeKrollStopCheckpoint {
+        return Object.freeze({
+            highest: this.highest.checkpoint(),
+            lowest: this.lowest.checkpoint(),
+            longAverage: this.longAverage.checkpoint(),
+            shortAverage: this.shortAverage.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: ChandeKrollStopCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || state.highest?.values?.length !== state.lowest?.values?.length
+            || state.longAverage?.values?.length !== state.shortAverage?.values?.length) {
+            throw new TypeError('sschart: invalid Chande Kroll Stop checkpoint');
+        }
+        this.highest.restore(state.highest);
+        this.lowest.restore(state.lowest);
+        this.longAverage.restore(state.longAverage);
+        this.shortAverage.restore(state.shortAverage);
+    }
+}
+
+export const ChandeKrollStopIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    ChandeKrollStopParameters
+> = registerIndicator({
+    id: 'ChandeKrollStop',
+    name: 'Chande Kroll Stop',
+    description: 'Range-adaptive long and short trailing-stop lines with partial-seed smoothing.',
+    category: IndicatorCategory.SupportResistance,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'period', name: 'Period', type: IndicatorParameterType.Integer,
+            defaultValue: 10, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'multiplier', name: 'Multiplier', type: IndicatorParameterType.Number,
+            defaultValue: 1.5, min: 0.001, max: 30, step: 0.001,
+        },
+        {
+            id: 'stopPeriod', name: 'Stop Period', type: IndicatorParameterType.Integer,
+            defaultValue: 9, min: 1, max: 500, step: 1,
+        },
+    ],
+    outputs: [
+        {
+            id: 'longStop', name: 'Long Stop',
+            defaultStyle: lineStyle('#26a69a'),
+        },
+        {
+            id: 'shortStop', name: 'Short Stop',
+            defaultStyle: lineStyle('#ef5350'),
+        },
+    ],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['chandekrollstop'],
+    painter: 'dual-line',
+    processorFactory: (parameters) => new ChandeKrollStopProcessor(
+        length(parameters?.period, 10),
+        number(parameters?.multiplier, 1.5, 0.001, 30, 'multiplier'),
+        length(parameters?.stopPeriod, 9),
+    ),
+});

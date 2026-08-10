@@ -1,44 +1,89 @@
-// Standard Deviation — JS port of
-// D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\StandardDeviation.cs.
-//
-// Population standard deviation (divides by Length, not Length-1, per .cs
-// `std / Length`):
-//   mean[i] = SMA(close, Length)[i]
-//   std[i]  = sqrt( sum_{k=i-Length+1..i} (close[k] - mean[i])^2 / Length )
-// Warm-up: first (length-1) values null.
-// Deviations from .cs: none — formula 1:1.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingStandardDeviation,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    LENGTH_STYLE,
+    LengthIndicatorParameters,
+    close,
+    resolvedLength,
+} from './shared/core.js';
 
-import { simpleMA as simpleMA_SD } from './helpers.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class StandardDeviationProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly deviation: RollingStandardDeviation;
 
-export function calcStandardDeviation(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 10;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    const closes = new Array(n);
-    for (let i = 0; i < n; i++) closes[i] = candles[i] && candles[i].close;
-    const sma = simpleMA_SD(closes, length);
-
-    for (let i = length - 1; i < n; i++) {
-        const m = sma[i];
-        if (m === null) continue;
-        let acc = 0;
-        let bad = false;
-        for (let k = i - length + 1; k <= i; k++) {
-            const v = closes[k];
-            if (typeof v !== 'number' || !Number.isFinite(v)) { bad = true; break; }
-            const d = v - m;
-            acc += d * d;
-        }
-        if (bad) continue;
-        out[i] = { time: candles[i].time, value: Math.sqrt(acc / length) };
+    constructor(readonly length: number) {
+        super(['line']);
+        this.deviation = new RollingStandardDeviation(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const value = commit
+            ? this.deviation.push(close(input))
+            : this.deviation.preview(close(input));
+        return {
+            isFormed: this.deviation.isFormed || value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.deviation.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.deviation.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void {
+        this.deviation.restore(state);
+    }
 }
+
+export const StandardDeviationIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LengthIndicatorParameters
+> = registerIndicator({
+    id: 'StandardDeviation',
+    name: 'Standard Deviation',
+    description: 'Population standard deviation of the rolling close-price window.',
+    category: IndicatorCategory.Volatility,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length',
+        name: 'Length',
+        description: 'Number of closing prices in the population window.',
+        type: IndicatorParameterType.Integer,
+        defaultValue: 10,
+        min: 1,
+        max: 500,
+        step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'StdDev',
+        defaultStyle: { ...LENGTH_STYLE, color: '#8d6e63' },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+
+    aliases: ['stddev', 'standarddeviation'],
+    processorFactory: (parameters) => new StandardDeviationProcessor(
+        resolvedLength(parameters, 10, 1),
+    ),
+});

@@ -1,45 +1,101 @@
-// True Range — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\TrueRange.cs.
-// TR[i] = max(|h-l|, |prevClose-h|, |prevClose-l|) for i >= 1. The first bar has no
-// previous candle, so TrueRange.cs is NOT formed there (IsFormed flips to true only on
-// the second candle) — StockSharp reports it as not-formed, so index 0 is emitted as null.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    LENGTH_STYLE,
+    close,
+} from './shared/core.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-/**
- * @returns {IndicatorPoint[]}
- */
-export function calcTrueRange(candles: CandlePoint[], _params?: IndicatorParams) {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
-
-    let prevClose: number | null = null;
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const t = c && c.time;
-        const h = c && c.high;
-        const l = c && c.low;
-        const cl = c && c.close;
-        const okHL = typeof h === 'number' && Number.isFinite(h)
-            && typeof l === 'number' && Number.isFinite(l);
-        if (!okHL) {
-            out[i] = { time: t, value: null };
-            // do not advance prevClose on bad bar
-            continue;
-        }
-        if (prevClose === null) {
-            // First candle: no previous close -> TrueRange.cs is not formed here.
-            out[i] = { time: t, value: null };
-            if (typeof cl === 'number' && Number.isFinite(cl)) prevClose = cl;
-            continue;
-        }
-        const a = h - l;
-        const b = Math.abs(prevClose - h);
-        const d = Math.abs(prevClose - l);
-        let tr = a > b ? a : b;
-        if (d > tr) tr = d;
-        out[i] = { time: t, value: tr };
-        if (typeof cl === 'number' && Number.isFinite(cl)) prevClose = cl;
-    }
-    return out;
+export interface TrueRangeIndicatorCheckpoint {
+    readonly previousClose: number | null;
 }
+
+export class TrueRangeProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    TrueRangeIndicatorCheckpoint
+> {
+    private previousClose: number | null = null;
+
+    constructor() { super(['line']); }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = input.value?.high;
+        const low = input.value?.low;
+        const closeValue = close(input);
+        if (typeof high !== 'number' || !Number.isFinite(high)
+            || typeof low !== 'number' || !Number.isFinite(low)) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+        if (this.previousClose === null) {
+            if (commit && closeValue !== null) this.previousClose = closeValue;
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+        const value = Math.max(
+            high - low,
+            Math.abs(this.previousClose - high),
+            Math.abs(this.previousClose - low),
+        );
+        if (commit && closeValue !== null) this.previousClose = closeValue;
+        return {
+            isFormed: true,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.previousClose = null; }
+    protected captureState(): TrueRangeIndicatorCheckpoint {
+        return Object.freeze({ previousClose: this.previousClose });
+    }
+    protected restoreState(state: TrueRangeIndicatorCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || (state.previousClose !== null
+                && (typeof state.previousClose !== 'number'
+                    || !Number.isFinite(state.previousClose)))) {
+            throw new TypeError('sschart: invalid True Range checkpoint');
+        }
+        this.previousClose = state.previousClose;
+    }
+}
+
+export const TrueRangeIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'TrueRange',
+    name: 'True Range',
+    description: 'Maximum intrabar range or gap from the previous valid close.',
+    category: IndicatorCategory.Volatility,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{
+        id: 'line',
+        name: 'TR',
+        defaultStyle: { ...LENGTH_STYLE, color: '#ffa726' },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+
+    aliases: ['tr', 'truerange'],
+    processorFactory: () => new TrueRangeProcessor(),
+});

@@ -1,51 +1,77 @@
-// Balance of Power (BOP).
-//   BOP[i] = (close - open) / (high - low)
-// Range is naturally bounded [-1, +1] because close and open are clamped
-// inside [low, high]; we still clamp defensively in case of malformed data.
-//
-// Flat-bar handling: when high == low the candle has no range —
-// StockSharp's BalanceOfPower.cs returns an empty IIndicatorValue and
-// does not advance IsFormed for that bar. We mirror that: emit `null` at
-// that array position (the renderer skips non-finite values; the parity
-// harness preserves expected blank rows so the row-by-row compare still
-// aligns). Same applies to bars with non-finite OHLC. Result length always
-// equals `candles.length`.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    lineStyle,
+} from './shared/range.js';
+import {
+    finite,
+    number,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class BalanceOfPowerProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    null
+> {
+    constructor() { super(['line']); }
 
-/**
- * @param {CandlePoint[]} candles
- * @param {object} [_params] No tunables — accepted for registry uniformity.
- * @returns {IndicatorPoint[]}
- */
-export function calcBalanceOfPower(candles: CandlePoint[], _params?: IndicatorParams) {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const o = c && c.open;
-        const h = c && c.high;
-        const l = c && c.low;
-        const cl = c && c.close;
-        if (typeof o !== 'number' || !Number.isFinite(o) ||
-            typeof h !== 'number' || !Number.isFinite(h) ||
-            typeof l !== 'number' || !Number.isFinite(l) ||
-            typeof cl !== 'number' || !Number.isFinite(cl)) {
-            out[i] = { time: c && c.time, value: null };
-            continue;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        _commit: boolean,
+    ): IndicatorCalculationResult {
+        const open = finite(input.value?.open);
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        let value: number | null = null;
+        if (open !== null && high !== null && low !== null && close !== null) {
+            const range = high - low;
+            if (range !== 0) {
+                const raw = (close - open) / range;
+                if (Number.isFinite(raw)) value = Math.max(-1, Math.min(1, raw));
+            }
         }
-        const range = h - l;
-        if (range === 0) {
-            // Flat bar — undefined, no value emitted (matches .cs).
-            out[i] = { time: c.time, value: null };
-            continue;
-        }
-        let v = (cl - o) / range;
-        if (v > 1) v = 1;
-        else if (v < -1) v = -1;
-        out[i] = { time: c.time, value: v };
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
+
+    protected resetState(): void {}
+    protected captureState(): null { return null; }
+    protected restoreState(state: null): void {
+        if (state !== null) throw new TypeError('sschart: invalid Balance of Power checkpoint');
+    }
 }
+
+export const BalanceOfPowerIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'BalanceOfPower',
+    name: 'Balance Of Power',
+    description: 'Close-to-open movement normalized by the full candle range.',
+    category: IndicatorCategory.MarketStrength,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{ id: 'line', name: 'Balance Of Power', defaultStyle: lineStyle('#26a69a') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+
+    aliases: ['balanceofpower'],
+    scaleRange: { min: -1, max: 1 },
+    levels: [0],
+    processorFactory: () => new BalanceOfPowerProcessor(),
+});

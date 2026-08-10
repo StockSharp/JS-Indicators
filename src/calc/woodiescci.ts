@@ -1,52 +1,139 @@
-// Woodies CCI — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\WoodiesCCI.cs.
-// Composite indicator with two lines:
-//   cci    = CCI(Length)              (default 14)
-//   signal = SMA(cci, SMALength)      (default 6)
-// .cs uses ComplexIndicatorModes.Sequence: the SMA receives the CCI value
-// as input (i.e. SMA(cci)) only when CCI is formed. Warm-up: CCI emits
-// from index Length-1; signal then emits from index Length-1 + SMALength-1.
-//
-// Deviations from .cs: none.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-import { calcCCI } from './cci.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-/**
- * @param {{length?: number, smaLength?: number}} [params]
- * @returns {{cci: IndicatorPoint[], signal: IndicatorPoint[]}}
- */
-export function calcWoodiesCCI(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-    const smaLength = params && Number.isFinite(params.smaLength) ? (params.smaLength | 0) : 6;
-
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { cci: [], signal: [] };
-    }
-    const n = candles.length;
-    const cciSeries = calcCCI(candles, { length });
-
-    const signal = new Array(n);
-    for (let i = 0; i < n; i++) signal[i] = { time: candles[i].time, value: null };
-
-    if (smaLength <= 0) return { cci: cciSeries, signal };
-
-    // .cs Sequence mode: SMA is fed only when CCI is formed. Find first
-    // index where CCI is non-null and run an SMA over the consecutive
-    // non-null cci stream from that point.
-    const cciValues: number[] = [];
-    const cciIndices: number[] = [];
-    for (let i = 0; i < n; i++) {
-        const v = cciSeries[i].value;
-        if (v !== null) {
-            cciValues.push(v);
-            cciIndices.push(i);
-        }
-    }
-    for (let k = smaLength - 1; k < cciValues.length; k++) {
-        let s = 0;
-        for (let j = k - smaLength + 1; j <= k; j++) s += cciValues[j];
-        const i = cciIndices[k];
-        signal[i] = { time: candles[i].time, value: s / smaLength };
-    }
-    return { cci: cciSeries, signal };
+export interface WoodiesCciParameters extends IndicatorParameters {
+    readonly length: number;
+    readonly smaLength: number;
 }
+
+export interface WoodiesCciCheckpoint {
+    readonly cci: RingBufferCheckpoint<number | null>;
+    readonly signal: RollingWindowCheckpoint;
+}
+
+export class WoodiesCciProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    WoodiesCciCheckpoint
+> {
+    private readonly cci: CommodityChannelIndexKernel;
+    private readonly signal: SimpleMovingAverage;
+
+    constructor(readonly length: number, readonly smaLength: number) {
+        super(['cci', 'signal']);
+        integer(length, length, 1, 500, 'length');
+        integer(smaLength, smaLength, 1, 500, 'smaLength');
+        this.cci = new CommodityChannelIndexKernel(length);
+        this.signal = new SimpleMovingAverage(smaLength);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        const typical = high === null || low === null || close === null
+            ? null
+            : (high + low + close) / 3;
+        const cci = commit ? this.cci.push(typical) : this.cci.preview(typical);
+        if (cci === null) {
+            return {
+                isFormed: false,
+                values: [
+                    this.output('cci', null, input.index),
+                    this.output('signal', null, input.index),
+                ],
+            };
+        }
+        const signal = commit ? this.signal.push(cci) : this.signal.preview(cci);
+        return {
+            isFormed: signal !== null,
+            values: [
+                this.output('cci', cci, input.index),
+                this.output('signal', signal, input.index),
+            ],
+        };
+    }
+
+    protected resetState(): void {
+        this.cci.reset();
+        this.signal.reset();
+    }
+
+    protected captureState(): WoodiesCciCheckpoint {
+        return Object.freeze({
+            cci: this.cci.checkpoint(),
+            signal: this.signal.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: WoodiesCciCheckpoint): void {
+        if (state === null || typeof state !== 'object')
+            throw new TypeError('sschart: invalid Woodies CCI checkpoint');
+        this.cci.restore(state.cci);
+        this.signal.restore(state.signal);
+    }
+}
+
+export const WoodiesCciIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    WoodiesCciParameters
+> = registerIndicator({
+    id: 'WoodiesCCI',
+    name: 'Woodies CCI',
+    description: 'Commodity Channel Index with a sequential simple-average signal line.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'length', name: 'CCI Length', type: IndicatorParameterType.Integer,
+            defaultValue: 14, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'smaLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
+            defaultValue: 6, min: 1, max: 500, step: 1,
+        },
+    ],
+    outputs: [
+        { id: 'cci', name: 'CCI', defaultStyle: style(IndicatorSeriesStyle.Line, '#42a5f5', 2) },
+        { id: 'signal', name: 'Signal', defaultStyle: style(IndicatorSeriesStyle.Line, '#ffca28') },
+    ],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['wcci', 'woodiescci'],
+    levels: [-100, 0, 100],
+    processorFactory: (parameters) => new WoodiesCciProcessor(
+        integer(parameters?.length, 14, 1, 500, 'length'),
+        integer(parameters?.smaLength, 6, 1, 500, 'smaLength'),
+    ),
+});

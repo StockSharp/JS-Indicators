@@ -1,63 +1,100 @@
-// Standard Error of Linear Regression — JS port of
-// D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\StandardError.cs.
-//
-// Fits y = slope * x + intercept over the last `Length` close prices
-// (x = 0..Length-1), then computes the residual standard error:
-//   stderr[i] = sqrt( sum((y - yEst)^2) / (Length - 2) )
-// Special cases (per .cs):
-//   - Length == 2: returns 0 (line passes through both points exactly).
-//   - Length == 1: not used; warm-up returns null.
-// Warm-up: first (length-1) values null.
-// Deviations from .cs: none — formula 1:1.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingLinearRegression,
+    type RollingLinearRegressionCheckpoint,
+} from '../math/index.js';
+import {
+    LENGTH_STYLE,
+    LengthIndicatorParameters,
+    close,
+    resolvedLength,
+} from './shared/core.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class StandardErrorProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingLinearRegressionCheckpoint
+> {
+    private readonly regression: RollingLinearRegression;
 
-export function calcStandardError(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 10;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
-
-    if (length < 1) return out;
-
-    for (let i = length - 1; i < n; i++) {
-        let sumX = 0;
-        let sumY = 0;
-        let sumXY = 0;
-        let sumX2 = 0;
-        let bad = false;
-        for (let k = 0; k < length; k++) {
-            const v = candles[i - length + 1 + k] && candles[i - length + 1 + k].close;
-            if (typeof v !== 'number' || !Number.isFinite(v)) { bad = true; break; }
-            sumX += k;
-            sumY += v;
-            sumXY += k * v;
-            sumX2 += k * k;
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500) {
+            throw new RangeError(
+                'sschart: Standard Error length must be an integer from 1 to 500',
+            );
         }
-        if (bad) continue;
-
-        const divisor = length * sumX2 - sumX * sumX;
-        const slope = divisor === 0 ? 0 : (length * sumXY - sumX * sumY) / divisor;
-        const intercept = (sumY - slope * sumX) / length;
-
-        // One or two points are fitted exactly, so the error is zero. Length 1 has to be named
-        // here as well: the general branch would evaluate sqrt(0 / -1), which is -0.
-        if (length <= 2) {
-            out[i] = { time: candles[i].time, value: 0 };
-            continue;
-        }
-
-        let sumErr2 = 0;
-        for (let k = 0; k < length; k++) {
-            const y = candles[i - length + 1 + k].close;
-            const yEst = slope * k + intercept;
-            const e = y - yEst;
-            sumErr2 += e * e;
-        }
-        out[i] = { time: candles[i].time, value: Math.sqrt(sumErr2 / (length - 2)) };
+        this.regression = new RollingLinearRegression(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        let value: number | null;
+        if (commit) {
+            this.regression.push(close(input));
+            value = this.regression.standardErrorValue;
+        } else {
+            value = this.regression.previewStandardError(close(input));
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.regression.reset(); }
+    protected captureState(): RollingLinearRegressionCheckpoint {
+        return this.regression.checkpoint();
+    }
+    protected restoreState(state: RollingLinearRegressionCheckpoint): void {
+        this.regression.restore(state);
+    }
 }
+
+export const StandardErrorIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    LengthIndicatorParameters
+> = registerIndicator({
+    id: 'StandardError',
+    name: 'Standard Error',
+    description: 'Residual standard error of a least-squares close-price regression.',
+    category: IndicatorCategory.Statistical,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length',
+        name: 'Length',
+        description: 'Number of closing prices in the regression window.',
+        type: IndicatorParameterType.Integer,
+        defaultValue: 10,
+        min: 1,
+        max: 500,
+        step: 1,
+    }],
+    outputs: [{
+        id: 'line',
+        name: 'Standard Error',
+        defaultStyle: { ...LENGTH_STYLE, color: '#78909c' },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+
+    aliases: ['stderr', 'standarderror'],
+    processorFactory: (parameters) => new StandardErrorProcessor(
+        resolvedLength(parameters, 10, 1),
+    ),
+});

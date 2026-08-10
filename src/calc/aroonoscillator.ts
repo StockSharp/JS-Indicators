@@ -1,77 +1,85 @@
-// Aroon Oscillator — single line in the [-100, +100] range:
-//   aroonOscillator[i] = aroonUp[i] - aroonDown[i]
-// Same warm-up rule as Aroon (output is null until index `length-1`).
-// Implementation duplicates the bars-since-high/low scan rather than
-// allocating a full Aroon result; cheaper for big candle arrays.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    AroonCheckpoint,
+    AroonKernel,
+    RangeLengthParameters,
+    lineStyle,
+} from './shared/range.js';
+import {
+    finite,
+    length,
+    number,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class AroonOscillatorProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    AroonCheckpoint
+> {
+    private readonly aroon: AroonKernel;
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcAroonOscillator(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
-
-    // Mirror AroonOscillator.cs which uses an internal Aroon{Up,Down} pair,
-    // reusing the same eviction-rescan idiosyncrasy: `*_ValueAge = i`
-    // assigns a buffer index treated as a bars-ago count.
-    const bufH: number[] = [];
-    const bufL: number[] = [];
-    let maxValue = -Infinity;
-    let maxValueAge = 0;
-    let minValue = +Infinity;
-    let minValueAge = 0;
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        if (typeof h !== 'number' || !Number.isFinite(h) ||
-            typeof l !== 'number' || !Number.isFinite(l)) {
-            continue;
-        }
-
-        if (h >= maxValue) { maxValue = h; maxValueAge = 0; }
-        else { maxValueAge++; }
-        if (l <= minValue) { minValue = l; minValueAge = 0; }
-        else { minValueAge++; }
-
-        if (bufH.length === length) {
-            if (bufH[0] === maxValue) {
-                maxValue = h;
-                maxValueAge = 0;
-                for (let k = 1; k < length; k++) {
-                    if (bufH[k] > maxValue) { maxValue = bufH[k]; maxValueAge = k; }
-                }
-            }
-            if (bufL[0] === minValue) {
-                minValue = l;
-                minValueAge = 0;
-                for (let k = 1; k < length; k++) {
-                    if (bufL[k] < minValue) { minValue = bufL[k]; minValueAge = k; }
-                }
-            }
-        }
-
-        bufH.push(h);
-        bufL.push(l);
-        if (bufH.length > length) bufH.shift();
-        if (bufL.length > length) bufL.shift();
-
-        if (bufH.length === length) {
-            const up = 100 * (length - maxValueAge) / length;
-            const down = 100 * (length - minValueAge) / length;
-            out[i] = { time: candles[i].time, value: up - down };
-        }
+    constructor(readonly length: number) {
+        super(['line']);
+        this.aroon = new AroonKernel(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const aroon = commit
+            ? this.aroon.push(high, low)
+            : this.aroon.preview(high, low);
+        const value = aroon.up === null || aroon.down === null
+            ? null
+            : aroon.up - aroon.down;
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.aroon.reset(); }
+    protected captureState(): AroonCheckpoint { return this.aroon.checkpoint(); }
+    protected restoreState(state: AroonCheckpoint): void { this.aroon.restore(state); }
 }
+
+export const AroonOscillatorIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    RangeLengthParameters
+> = registerIndicator({
+    id: 'AroonOscillator',
+    name: 'Aroon Oscillator',
+    description: 'Difference between Aroon Up and Aroon Down on one shared state.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [{
+        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+        defaultValue: 14, min: 1, max: 500, step: 1,
+    }],
+    outputs: [{ id: 'line', name: 'Aroon Oscillator', defaultStyle: lineStyle('#7e57c2') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+
+    aliases: ['aroonoscillator'],
+    scaleRange: { min: -100, max: 100 },
+    levels: [-50, 0, 50],
+    processorFactory: (parameters) => new AroonOscillatorProcessor(
+        length(parameters?.length, 14),
+    ),
+});

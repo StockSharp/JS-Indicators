@@ -1,6 +1,10 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
+const { loadDumpStatus, readDump, requireDump } = require('./csharp-dump.js');
+
+const status = loadDumpStatus();
+
 const {
     AverageTrueRange,
     ExpandingWilderMovingAverage,
@@ -25,9 +29,6 @@ const {
     TrueRange,
     WilderMovingAverage,
 } = require('../src/index.js');
-const { calcSMA } = require('../src/calc/sma.js');
-const { calcEMA } = require('../src/calc/ema.js');
-const { calcATR } = require('../src/calc/atr.js');
 
 function candle(time, high, low, close) {
     return { time, open: close, high, low, close };
@@ -406,32 +407,41 @@ describe('incremental indicator math kernel', () => {
         closeTo(atr.push(bars[3]), 34 / 9);
     });
 
-    it('matches the independent batch oracle for SMA, EMA and ATR', () => {
-        const bars = Array.from({ length: 80 }, (_, index) => {
-            const close = 100 + Math.sin(index / 4) * 7 + index * 0.13;
-            return {
-                time: index + 1,
-                open: close - 0.25,
-                high: close + 1 + (index % 3) * 0.1,
-                low: close - 1 - (index % 5) * 0.1,
-                close,
-            };
-        });
-        const length = 14;
+    it('matches StockSharp, which is the only oracle a kernel has', () => {
+        // This used to compare the kernel against the batch calc -- a second implementation of the
+        // same arithmetic, written separately, which is what made it an opinion worth having. The
+        // batch layer is gone, and comparing the kernel against the indicator built on it would
+        // compare SimpleMovingAverage to a wrapper around SimpleMovingAverage: true whatever the
+        // formula says. So the oracle is the platform, the same one every other tier uses.
+        requireDump(status);
+        const dump = readDump('values.json');
+        const bars = dump.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
+
+        // The kernels a platform indicator is named after and configured identically to. A kernel
+        // with no such counterpart is checked by its own unit cases above; this is about the three
+        // the platform can speak for.
         const cases = [
-            [new SimpleMovingAverage(length), calcSMA(bars, { length })],
-            [new ExponentialMovingAverage(length), calcEMA(bars, { length })],
-            [new AverageTrueRange(length), calcATR(bars, { length })],
+            ['SimpleMovingAverage', (n) => new SimpleMovingAverage(n), (bar) => bar.close],
+            ['ExponentialMovingAverage', (n) => new ExponentialMovingAverage(n), (bar) => bar.close],
+            ['AverageTrueRange', (n) => new AverageTrueRange(n), (bar) => bar],
         ];
 
-        for (const [kernel, expected] of cases) {
+        const failures = [];
+        for (const [kind, make, feed] of cases) {
+            const cs = dump.indicators.find((i) => i.kind === kind);
+            if (!cs) { failures.push(`${kind}: absent from the dump`); continue; }
+            const kernel = make(cs.params.Length);
             bars.forEach((bar, index) => {
-                const input = kernel instanceof AverageTrueRange ? bar : bar.close;
-                const actual = kernel.push(input);
-                const oracle = expected[index].value;
-                if (oracle === null) assert.equal(actual, null);
-                else closeTo(actual, oracle, 1e-10);
+                const actual = kernel.push(feed(bar));
+                const expected = cs.values[index];
+                if (expected === null || expected === undefined) {
+                    if (actual !== null) failures.push(`${kind} bar ${index}: kernel ${actual}, platform none`);
+                } else if (actual === null || Math.abs(actual - expected) > 1e-9 * Math.max(1, Math.abs(expected))) {
+                    failures.push(`${kind} bar ${index}: kernel ${actual}, platform ${expected}`);
+                }
             });
         }
+
+        assert.deepEqual(failures.slice(0, 10), [], `${failures.length} kernel values disagree with StockSharp`);
     });
 });

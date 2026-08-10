@@ -8,7 +8,7 @@ import type {
     IndicatorParameters,
     IndicatorProcessResult,
 } from './indicator-definition.js';
-import { resolveIndicatorOutputs } from './indicator-definition.js';
+import { resolveIndicatorOutputs, resolveIndicatorParameters } from './indicator-definition.js';
 import {
     normalizeIndicatorOutputMetadata,
     sameIndicatorOutputMetadata,
@@ -197,7 +197,9 @@ export class IndicatorRuntime<
         this.snapshotInput = options.snapshotInput ?? defaultSnapshot;
         if (typeof this.snapshotInput !== 'function')
             throw new TypeError('sschart: indicator runtime snapshotInput must be a function');
-        this.processor = options.definition.processorFactory(options.parameters);
+        this.processor = options.definition.processorFactory(
+            resolveIndicatorParameters(options.definition, options.parameters),
+        );
         this.validateProcessor(this.processor);
         this.checkpoints.set(0, this.runtimeCheckpoint());
     }

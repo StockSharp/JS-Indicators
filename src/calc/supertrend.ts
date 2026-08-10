@@ -1,126 +1,204 @@
-// SuperTrend — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\SuperTrend.cs.
-//
-// Trailing stop based on ATR(length) with multiplier:
-//   hl2          = (high + low) / 2
-//   basicUpper   = hl2 + multiplier * atr
-//   basicLower   = hl2 - multiplier * atr
-//   finalUpper   = (prevUpper is null OR basicUpper < prevUpper OR prevClose > prevUpper)
-//                    ? basicUpper : prevUpper
-//   finalLower   = (prevLower is null OR basicLower > prevLower OR prevClose < prevLower)
-//                    ? basicLower : prevLower
-//   first formed bar:
-//     supertrend = close >= hl2 ? finalLower : finalUpper
-//     trend      = close >= hl2 ? +1 : -1
-//   subsequent bars:
-//     if prev trend == +1:
-//        supertrend = close <= finalLower ? finalUpper : finalLower
-//        trend      = close <= finalLower ? -1 : +1
-//     else:
-//        supertrend = close >= finalUpper ? finalLower : finalUpper
-//        trend      = close >= finalUpper ? +1 : -1
-//
-// Output keys: value (supertrend line) and direction (+1 / -1).
-// Warm-up: until ATR is formed (index < length), both null/0. First formed
-// bar is at index `length` (same as ATR; see atr.js header for the seed
-// rationale).
-// Deviations from .cs: none — direct 1:1 port.
-//
-// @typedef {{time:number|string,open:number,high:number,low:number,close:number,volume:number}} Candle
-// @typedef {{time:number|string,value:number|null}} Point
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    ExpandingAverageTrueRange,
+    type ExpandingAverageTrueRangeCheckpoint,
+} from '../math/index.js';
+import {
+    parameter,
+} from './shared/adaptive.js';
+import {
+    finite,
+    integer,
+} from './shared/guards.js';
 
-import { csATR } from './helpers.js';
-
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-/**
- * @param {Candle[]} candles
- * @param {{length?: number, multiplier?: number}} [params]
- * @returns {{value: Point[], direction: Point[]}}
- */
-
-export function calcSuperTrend(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 10;
-    const multiplier = params && Number.isFinite(params.multiplier) ? +params.multiplier : 3;
-
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { value: [], direction: [] };
-    }
-
-    const n = candles.length;
-    const value = new Array(n);
-    const direction = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const t = candles[i] && candles[i].time;
-        value[i] = { time: t, value: null };
-        direction[i] = { time: t, value: null };
-    }
-
-    const atr = csATR(candles, length);
-
-    let prevUpper: number | null = null;
-    let prevLower: number | null = null;
-    let prevClose: number | null = null;
-    let prevSupertrend: number | null = null;
-    let prevTrend = 0;
-
-    // SuperTrend only emits once ATR.IsFormed = true, which happens at bar
-    // length-1 (when the WilderMovingAverage buffer has accumulated `length`
-    // TR samples; TR[0] is the high-low seed). csATR returns non-null from
-    // bar 0 already (partial cumulative average), so gate explicitly.
-    const atrFormedFrom = length - 1;
-
-    for (let i = 0; i < n; i++) {
-        if (i < atrFormedFrom) continue;
-        const c = candles[i];
-        if (!c) continue;
-        const close = c.close;
-        const high = c.high;
-        const low = c.low;
-        const a = atr[i] && atr[i].value;
-
-        if (typeof close !== 'number' || !Number.isFinite(close) ||
-            typeof high !== 'number' || !Number.isFinite(high) ||
-            typeof low !== 'number' || !Number.isFinite(low) ||
-            a === null || typeof a !== 'number' || !Number.isFinite(a)) {
-            continue;
-        }
-
-        const hl2 = (high + low) / 2;
-        const basicUpper = hl2 + multiplier * a;
-        const basicLower = hl2 - multiplier * a;
-
-        const finalUpper: number = (prevUpper === null || basicUpper < prevUpper ||
-                           (prevClose !== null && prevClose > prevUpper))
-            ? basicUpper
-            : prevUpper;
-
-        const finalLower: number = (prevLower === null || basicLower > prevLower ||
-                           (prevClose !== null && prevClose < prevLower))
-            ? basicLower
-            : prevLower;
-
-        let st;
-        let trend;
-        if (prevSupertrend === null) {
-            st = close >= hl2 ? finalLower : finalUpper;
-            trend = close >= hl2 ? 1 : -1;
-        } else if (prevTrend === 1) {
-            st = close <= finalLower ? finalUpper : finalLower;
-            trend = close <= finalLower ? -1 : 1;
-        } else {
-            st = close >= finalUpper ? finalLower : finalUpper;
-            trend = close >= finalUpper ? 1 : -1;
-        }
-
-        value[i] = { time: c.time, value: st };
-        direction[i] = { time: c.time, value: trend };
-
-        prevUpper = finalUpper;
-        prevLower = finalLower;
-        prevClose = close;
-        prevSupertrend = st;
-        prevTrend = trend;
-    }
-
-    return { value, direction };
+export interface SuperTrendParameters extends IndicatorParameters {
+    readonly length: number;
+    readonly multiplier: number;
 }
+
+export interface SuperTrendCheckpoint {
+    readonly averageTrueRange: ExpandingAverageTrueRangeCheckpoint;
+    readonly previousSupertrend: number | null;
+    readonly previousClose: number | null;
+    readonly previousUpperBand: number | null;
+    readonly previousLowerBand: number | null;
+    readonly trend: -1 | 1;
+}
+
+/** StockSharp SuperTrend with direction carried as painter metadata. */
+export class SuperTrendProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    SuperTrendCheckpoint
+> {
+    private readonly averageTrueRange: ExpandingAverageTrueRange;
+    private previousSupertrend: number | null = null;
+    private previousClose: number | null = null;
+    private previousUpperBand: number | null = null;
+    private previousLowerBand: number | null = null;
+    private trend: -1 | 1 = 1;
+
+    constructor(readonly length: number, readonly multiplier: number) {
+        super(['value']);
+        integer(length, length, 1, 500, 'length');
+        parameter(multiplier, multiplier, 0.000001, 500, 'multiplier');
+        this.averageTrueRange = new ExpandingAverageTrueRange(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const candle = input.value;
+        const averageTrueRange = commit
+            ? this.averageTrueRange.push(candle)
+            : this.averageTrueRange.preview(candle);
+        const high = finite(candle?.high);
+        const low = finite(candle?.low);
+        const close = finite(candle?.close);
+
+        // AverageTrueRange emits a growing warm-up value, while StockSharp's
+        // SuperTrend deliberately waits until its configured window is formed.
+        if (input.index < this.length - 1 || averageTrueRange === null
+            || high === null || low === null || close === null) {
+            return {
+                isFormed: false,
+                values: [this.output('value', null, input.index)],
+            };
+        }
+
+        const midpoint = (high + low) / 2;
+        const basicUpperBand = midpoint + this.multiplier * averageTrueRange;
+        const basicLowerBand = midpoint - this.multiplier * averageTrueRange;
+        const finalUpperBand = this.previousUpperBand === null
+            || basicUpperBand < this.previousUpperBand
+            || (this.previousClose !== null && this.previousClose > this.previousUpperBand)
+            ? basicUpperBand
+            : this.previousUpperBand;
+        const finalLowerBand = this.previousLowerBand === null
+            || basicLowerBand > this.previousLowerBand
+            || (this.previousClose !== null && this.previousClose < this.previousLowerBand)
+            ? basicLowerBand
+            : this.previousLowerBand;
+
+        let value: number;
+        let trend: -1 | 1;
+        if (this.previousSupertrend === null) {
+            trend = close >= midpoint ? 1 : -1;
+            value = trend === 1 ? finalLowerBand : finalUpperBand;
+        } else if (this.trend === 1) {
+            trend = close <= finalLowerBand ? -1 : 1;
+            value = trend === 1 ? finalLowerBand : finalUpperBand;
+        } else {
+            trend = close >= finalUpperBand ? 1 : -1;
+            value = trend === 1 ? finalLowerBand : finalUpperBand;
+        }
+
+        if (commit) {
+            this.previousSupertrend = value;
+            this.previousClose = close;
+            this.previousUpperBand = finalUpperBand;
+            this.previousLowerBand = finalLowerBand;
+            this.trend = trend;
+        }
+        return {
+            isFormed: true,
+            values: [this.output('value', value, input.index, { up: trend === 1 })],
+        };
+    }
+
+    protected resetState(): void {
+        this.averageTrueRange.reset();
+        this.previousSupertrend = null;
+        this.previousClose = null;
+        this.previousUpperBand = null;
+        this.previousLowerBand = null;
+        this.trend = 1;
+    }
+
+    protected captureState(): SuperTrendCheckpoint {
+        return Object.freeze({
+            averageTrueRange: this.averageTrueRange.checkpoint(),
+            previousSupertrend: this.previousSupertrend,
+            previousClose: this.previousClose,
+            previousUpperBand: this.previousUpperBand,
+            previousLowerBand: this.previousLowerBand,
+            trend: this.trend,
+        });
+    }
+
+    protected restoreState(state: SuperTrendCheckpoint): void {
+        const recursive = [
+            state?.previousSupertrend,
+            state?.previousClose,
+            state?.previousUpperBand,
+            state?.previousLowerBand,
+        ];
+        const initialized = recursive[0] !== null;
+        if (state === null || typeof state !== 'object'
+            || ![-1, 1].includes(state.trend)
+            || recursive.some((value) => value !== null && finite(value) === null)
+            || recursive.some((value) => (value !== null) !== initialized)) {
+            throw new TypeError('sschart: invalid SuperTrend checkpoint');
+        }
+        this.averageTrueRange.restore(state.averageTrueRange);
+        this.previousSupertrend = state.previousSupertrend;
+        this.previousClose = state.previousClose;
+        this.previousUpperBand = state.previousUpperBand;
+        this.previousLowerBand = state.previousLowerBand;
+        this.trend = state.trend;
+    }
+}
+
+export const SuperTrendIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    SuperTrendParameters
+> = registerIndicator({
+    id: 'SuperTrend',
+    name: 'Super Trend',
+    description: 'ATR-based trailing trend line with the direction attached to each point.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+            defaultValue: 10, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'multiplier', name: 'Multiplier', type: IndicatorParameterType.Number,
+            defaultValue: 3, min: 0.000001, max: 500, step: 0.1,
+        },
+    ],
+    outputs: [{
+        id: 'value', name: 'Super Trend',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#26a69a',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['supertrend'],
+    processorFactory: (parameters) => new SuperTrendProcessor(
+        integer(parameters?.length, 10, 1, 500, 'length'),
+        parameter(parameters?.multiplier, 3, 0.000001, 500, 'multiplier'),
+    ),
+});

@@ -1,102 +1,143 @@
-// Twiggs Money Flow — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\TwiggsMoneyFlow.cs.
-// Deviations from .cs: none.
-//
-// Per bar:
-//   tp = (high + low + close) / 3
-//   cl = high - low                     (candle.GetLength)
-//   ad = volume * (2*tp - high - low) / cl  if cl != 0
-//      = prevAd                              otherwise
-//   tmf = EMA(ad, length) / EMA(volume, length)
-// (.cs does NOT multiply by 100; returns null when tmf == 0.)
-//
-// Default length = 21.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    ExponentialMovingAverage,
+    type SeededMovingAverageCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+    resolvedPeriod,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-function emaArray(values: (number | null)[], length: number) {
-    const n = values.length;
-    const out = new Array(n);
-    if (n === 0 || length <= 0) {
-        for (let i = 0; i < n; i++) out[i] = null;
-        return out;
-    }
-    let seedSum = 0, seedCount = 0, seedDone = false, prev = 0;
-    const k = 2 / (length + 1);
-    for (let i = 0; i < n; i++) {
-        const v = values[i];
-        const ok = typeof v === 'number' && Number.isFinite(v);
-        if (!seedDone) {
-            if (!ok) { out[i] = null; continue; }
-            seedSum += v;
-            seedCount++;
-            if (seedCount === length) {
-                prev = seedSum / length;
-                out[i] = prev;
-                seedDone = true;
-            } else out[i] = null;
-            continue;
-        }
-        if (!ok) { out[i] = null; continue; }
-        prev = v * k + prev * (1 - k);
-        out[i] = prev;
-    }
-    return out;
+export interface TwiggsMoneyFlowCheckpoint {
+    readonly advanceDecline: SeededMovingAverageCheckpoint;
+    readonly volume: SeededMovingAverageCheckpoint;
+    readonly previousAdvanceDecline: number;
 }
 
-/**
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcTwiggsMoneyFlow(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 21;
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
+export class TwiggsMoneyFlowProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    TwiggsMoneyFlowCheckpoint
+> {
+    private readonly advanceDecline: ExponentialMovingAverage;
+    private readonly volume: ExponentialMovingAverage;
+    private previousAdvanceDecline = 0;
 
-    const ads = new Array(n);
-    const vols = new Array(n);
-    let prevAd = 0;
-
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        const cl = c && c.close;
-        const v = c && c.volume;
-        const ok = typeof h === 'number' && Number.isFinite(h)
-            && typeof l === 'number' && Number.isFinite(l)
-            && typeof cl === 'number' && Number.isFinite(cl)
-            && typeof v === 'number' && Number.isFinite(v);
-        if (!ok) {
-            ads[i] = null;
-            vols[i] = null;
-            continue;
-        }
-        const range = h - l;
-        let ad;
-        if (range !== 0) {
-            const tp = (h + l + cl) / 3;
-            ad = v * (2 * tp - h - l) / range;
-        } else {
-            ad = prevAd;
-        }
-        ads[i] = ad;
-        vols[i] = v;
-        prevAd = ad;
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedPeriod(length, length, 'length');
+        this.advanceDecline = new ExponentialMovingAverage(length);
+        this.volume = new ExponentialMovingAverage(length);
     }
 
-    const adEma = emaArray(ads, length);
-    const volEma = emaArray(vols, length);
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        const incomingVolume = finite(input.value?.volume);
+        if (high === null || low === null || close === null || incomingVolume === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
 
-    for (let i = 0; i < n; i++) {
-        const a = adEma[i];
-        const b = volEma[i];
-        if (a === null || b === null || b === 0) continue;
-        const tmf = a / b;
-        if (tmf === 0) continue; // .cs returns null when tmf==0
-        out[i] = { time: candles[i].time, value: tmf };
+        const range = high - low;
+        const typical = (high + low + close) / 3;
+        const advanceDecline = range === 0
+            ? this.previousAdvanceDecline
+            : finite(incomingVolume * (2 * typical - high - low) / range);
+        if (advanceDecline === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const averageAdvanceDecline = commit
+            ? this.advanceDecline.push(advanceDecline)
+            : this.advanceDecline.preview(advanceDecline);
+        const averageVolume = commit
+            ? this.volume.push(incomingVolume)
+            : this.volume.preview(incomingVolume);
+        if (commit) this.previousAdvanceDecline = advanceDecline;
+
+        const formed = averageAdvanceDecline !== null && averageVolume !== null;
+        const ratio = !formed || averageVolume === 0
+            ? null
+            : finite(averageAdvanceDecline / averageVolume);
+        const value = ratio === 0 ? null : ratio;
+        return {
+            isFormed: formed,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
+
+    protected resetState(): void {
+        this.advanceDecline.reset();
+        this.volume.reset();
+        this.previousAdvanceDecline = 0;
+    }
+
+    protected captureState(): TwiggsMoneyFlowCheckpoint {
+        return Object.freeze({
+            advanceDecline: this.advanceDecline.checkpoint(),
+            volume: this.volume.checkpoint(),
+            previousAdvanceDecline: this.previousAdvanceDecline,
+        });
+    }
+
+    protected restoreState(state: TwiggsMoneyFlowCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || finite(state.previousAdvanceDecline) === null
+            || state.advanceDecline?.count !== state.volume?.count
+            || state.advanceDecline?.formed !== state.volume?.formed) {
+            throw new TypeError('sschart: invalid Twiggs Money Flow checkpoint');
+        }
+        this.advanceDecline.restore(state.advanceDecline);
+        this.volume.restore(state.volume);
+        this.previousAdvanceDecline = state.previousAdvanceDecline;
+    }
 }
+
+export const TwiggsMoneyFlowIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'TwiggsMoneyFlow',
+    name: 'Twiggs Money Flow',
+    description: 'Ratio of exponential averages of Twiggs accumulation and traded volume.',
+    category: IndicatorCategory.Volume,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(21)],
+    outputs: [{ id: 'line', name: 'TMF', defaultStyle: lineStyle('#26a69a') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['tmf', 'twiggsmoneyflow'],
+    scaleRange: { min: -1, max: 1 },
+    levels: [0],
+    processorFactory: (parameters) => new TwiggsMoneyFlowProcessor(
+        resolvedLength(parameters, 21),
+    ),
+});

@@ -1,106 +1,160 @@
-// DeMarker indicator (Algo.Indicators/DeMarker.cs).
-// Single-output oscillator bounded in [0, 1].
-//
-// Per-bar logic (after the 1-bar init):
-//   deMax[i] = high[i] > prevHigh ? high[i] - prevHigh : 0
-//   deMin[i] = low[i]  < prevLow  ? prevLow - low[i]   : 0
-//   prevHigh, prevLow ← high[i], low[i]
-//
-//   deMaxSma = SMA(deMax, length)
-//   deMinSma = SMA(deMin, length)
-//   DeMarker = (deMaxSma + deMinSma) != 0
-//              ? deMaxSma / (deMaxSma + deMinSma)
-//              : 0.5
-//
-// Warm-up matches .cs:
-//   * Bar 0: cached as `_prevHigh/_prevLow`; output null.
-//   * Bars 1..length: produce deMax/deMin samples but SMAs not yet formed
-//     (need `length` samples); output null.
-//   * Bar `length`: first formed DeMarker.
-//
-// NumValuesToInitialize in .cs is base+1 — matches "first valid at bar
-// index `length`" since the SMA needs `length` deMax samples and they
-// start at bar 1.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+    resolvedPeriod,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcDeMarker(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
-
-    // Build deMax / deMin streams aligned with input candles. Index 0 has
-    // no previous bar — mirror .cs's _isInitialized gating: emit no
-    // contribution at i=0, then for i >= 1 we have deMax[i]/deMin[i].
-    const deMax = new Array(n);
-    const deMin = new Array(n);
-    for (let i = 0; i < n; i++) { deMax[i] = null; deMin[i] = null; }
-
-    // Walk bar-by-bar exactly like the .cs: SMAs only see samples starting
-    // at i=1, so SMA forms when we've fed it `length` samples ⇒ bar
-    // index 1 + (length-1) = length.
-    let prevHigh: number | null = null;
-    let prevLow: number | null = null;
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        if (typeof h !== 'number' || !Number.isFinite(h) ||
-            typeof l !== 'number' || !Number.isFinite(l)) {
-            // Don't update prev — wait for a clean bar to re-anchor.
-            continue;
-        }
-        if (prevHigh === null || prevLow === null) {
-            prevHigh = h;
-            prevLow = l;
-            continue;
-        }
-        deMax[i] = h > prevHigh ? h - prevHigh : 0;
-        deMin[i] = l < prevLow ? prevLow - l : 0;
-        prevHigh = h;
-        prevLow = l;
-    }
-
-    // SMAs of length `length` over the deMax / deMin samples — but only the
-    // *non-null* slots count, since bar 0 contributes nothing per .cs.
-    // We use a windowed sum over candle indices; null entries reset the
-    // sum (matches "_deMaxSma.Process" being called only on real samples).
-    // Since deMax/deMin are null only on the very first bar (and on
-    // unparseable bars), this works the same as feeding them sequentially.
-    let maxSum = 0;
-    let minSum = 0;
-    let validCount = 0;
-    // Track which sample-indices are currently inside the window so we can
-    // properly evict the oldest. We index into the non-null sample stream.
-    const validIdx: number[] = [];
-    for (let i = 0; i < n; i++) {
-        if (deMax[i] === null || deMin[i] === null) continue;
-        maxSum += deMax[i];
-        minSum += deMin[i];
-        validIdx.push(i);
-        if (validIdx.length > length) {
-            const drop = validIdx.shift()!;
-            maxSum -= deMax[drop];
-            minSum -= deMin[drop];
-        }
-        validCount++;
-        if (validCount < length) continue;
-        const a = maxSum / length;
-        const b = minSum / length;
-        const denom = a + b;
-        const v = denom !== 0 ? a / denom : 0.5;
-        out[i] = { time: candles[i].time, value: v };
-    }
-
-    return out;
+export interface DeMarkerCheckpoint {
+    readonly previousHigh: number | null;
+    readonly previousLow: number | null;
+    readonly deMax: RollingWindowCheckpoint;
+    readonly deMin: RollingWindowCheckpoint;
 }
+
+export class DeMarkerProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    DeMarkerCheckpoint
+> {
+    private previousHigh: number | null = null;
+    private previousLow: number | null = null;
+    private readonly deMax: SimpleMovingAverage;
+    private readonly deMin: SimpleMovingAverage;
+
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedPeriod(length, length, 'length');
+        this.deMax = new SimpleMovingAverage(length);
+        this.deMin = new SimpleMovingAverage(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        if (high === null || low === null) {
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        if (this.previousHigh === null || this.previousLow === null) {
+            if (commit) {
+                this.previousHigh = high;
+                this.previousLow = low;
+            }
+            return {
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
+            };
+        }
+
+        const currentDeMax = high > this.previousHigh ? high - this.previousHigh : 0;
+        const currentDeMin = low < this.previousLow ? this.previousLow - low : 0;
+        const averageDeMax = commit
+            ? this.deMax.push(currentDeMax)
+            : this.deMax.preview(currentDeMax);
+        const averageDeMin = commit
+            ? this.deMin.push(currentDeMin)
+            : this.deMin.preview(currentDeMin);
+        if (commit) {
+            this.previousHigh = high;
+            this.previousLow = low;
+        }
+
+        const denominator = averageDeMax === null || averageDeMin === null
+            ? null
+            : averageDeMax + averageDeMin;
+        const value = denominator === null
+            ? null
+            : denominator === 0 ? 0.5 : averageDeMax! / denominator;
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.previousHigh = null;
+        this.previousLow = null;
+        this.deMax.reset();
+        this.deMin.reset();
+    }
+
+    protected captureState(): DeMarkerCheckpoint {
+        return Object.freeze({
+            previousHigh: this.previousHigh,
+            previousLow: this.previousLow,
+            deMax: this.deMax.checkpoint(),
+            deMin: this.deMin.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: DeMarkerCheckpoint): void {
+        const validWindow = (checkpoint: RollingWindowCheckpoint) => (
+            checkpoint !== null
+            && typeof checkpoint === 'object'
+            && Array.isArray(checkpoint.values)
+            && checkpoint.values.length <= this.length
+            && checkpoint.values.every((value) => finite(value) !== null)
+        );
+        const seeded = state?.previousHigh !== null && state?.previousLow !== null;
+        if (state === null || typeof state !== 'object'
+            || (state.previousHigh !== null && finite(state.previousHigh) === null)
+            || (state.previousLow !== null && finite(state.previousLow) === null)
+            || ((state.previousHigh === null) !== (state.previousLow === null))
+            || !validWindow(state.deMax) || !validWindow(state.deMin)
+            || state.deMax.values.length !== state.deMin.values.length
+            || (!seeded && state.deMax.values.length !== 0)) {
+            throw new TypeError('sschart: invalid DeMarker checkpoint');
+        }
+        this.deMax.restore(state.deMax);
+        this.deMin.restore(state.deMin);
+        this.previousHigh = state.previousHigh;
+        this.previousLow = state.previousLow;
+    }
+}
+
+export const DeMarkerIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'DeMarker',
+    name: 'De Marker',
+    description: 'Ratio of recent upward high movement to combined high and low movement.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14)],
+    outputs: [{ id: 'line', name: 'De Marker', defaultStyle: lineStyle('#42a5f5') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['demarker'],
+    scaleRange: { min: 0, max: 1 },
+    levels: [0.3, 0.7],
+    processorFactory: (parameters) => new DeMarkerProcessor(resolvedLength(parameters, 14)),
+});

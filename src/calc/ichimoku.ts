@@ -1,153 +1,252 @@
-// Ichimoku Kinkō Hyō (Goichi Hosoda).
-//   Tenkan-sen   = (highestClose(tenkan)  + lowestClose(tenkan))  / 2
-//   Kijun-sen    = (highestClose(kijun)   + lowestClose(kijun))   / 2
-//   Senkou Span A = (Tenkan + Kijun) / 2, shifted forward by `kijun` bars
-//   Senkou Span B = (highestClose(senkouB) + lowestClose(senkouB)) / 2,
-//                   shifted forward by `kijun` bars
-//   Chikou (Chinkou) = close at the current bar — see note below.
-//
-// Source-price note: StockSharp's IchimokuLine reads its inputs via
-// `input.ToCandle()` and takes the rolling max of HighPrice / min of
-// LowPrice — so Tenkan/Kijun/SenkouB midpoints are computed over HIGH/LOW,
-// not the close. We match the live C# and do the same (verified bar-for-bar
-// against Algo.Indicators).
-//
-// Forward-shift semantics: SenkouA/SenkouB buffer their raw value each final
-// bar and emit the oldest once the buffer has grown to `kijun` slots — a
-// `kijun`-bar forward shift. Emission starts one bar before the buffer is
-// full, so the first raw value is output twice; `shiftForward` reproduces
-// that exactly (see its doc). Values that would land past the last candle
-// are dropped (caller can extend into the future if it wants).
-//
-// Chikou: IchimokuChinkouLine.cs returns `candle.ClosePrice` directly — the
-// current bar's close, NOT a close from `kijun` bars ahead; the visual
-// back-shift is chart-side only. The line is a DecimalLengthIndicator with
-// Length = kijun, so it stays null until its buffer fills (bar kijun-1),
-// then emits close[i].
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorOutputValue,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMaximum,
+    RollingMinimum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    lineStyle,
+    period,
+    validWindow,
+} from './shared/shifted-sparse.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-/** The five Ichimoku lines, each aligned 1:1 with the input candles. */
-export interface IchimokuSeries {
-    tenkan: IndicatorPoint[];
-    kijun: IndicatorPoint[];
-    senkouA: IndicatorPoint[];
-    senkouB: IndicatorPoint[];
-    chikou: IndicatorPoint[];
+export function parameter(
+    values: IchimokuParameters,
+    name: 'tenkanLength' | 'kijunLength' | 'senkouBLength',
+    alias: 'tenkanPeriod' | 'kijunPeriod' | 'senkouBPeriod',
+    fallback: number,
+    maximum: number,
+): number {
+    return period(values?.[name] ?? values?.[alias], fallback, 1, maximum, name);
 }
 
-/**
- * Highest-close + lowest-close midpoint over a trailing window of `length` bars.
- * Returns array aligned 1:1 with input. First (length-1) slots null.
- */
-function midpointSeries(candles: CandlePoint[], length: number) {
-    const n = candles.length;
-    const out = new Array(n);
-    if (length <= 0) {
-        for (let i = 0; i < n; i++) out[i] = null;
-        return out;
-    }
-    for (let i = 0; i < n; i++) {
-        if (i < length - 1) { out[i] = null; continue; }
-        let hi = -Infinity;
-        let lo = +Infinity;
-        let bad = false;
-        for (let j = i - length + 1; j <= i; j++) {
-            const c = candles[j];
-            const h = c && c.high;
-            const l = c && c.low;
-            if (typeof h !== 'number' || !Number.isFinite(h) ||
-                typeof l !== 'number' || !Number.isFinite(l)) { bad = true; break; }
-            if (h > hi) hi = h;
-            if (l < lo) lo = l;
-        }
-        out[i] = bad ? null : (hi + lo) / 2;
-    }
-    return out;
+export function lengthParameter(
+    id: 'tenkanLength' | 'kijunLength' | 'senkouBLength',
+    name: string,
+    defaultValue: number,
+    maximum: number,
+) {
+    return {
+        id,
+        name,
+        type: IndicatorParameterType.Integer,
+        defaultValue,
+        min: 1,
+        max: maximum,
+        step: 1,
+    } as const;
 }
 
-export function calcIchimoku(candles: CandlePoint[], params?: IndicatorParams): IchimokuSeries {
-    // Accept both the short keys (`tenkan`/`kijun`/`senkouB`) used by the
-    // terminal UI and the *Period suffix names (`tenkanPeriod`/`kijunPeriod`/
-    // `senkouBPeriod`) used by some callers (parity harness, server settings).
-    const pick = (a: string, b: string, def: number): number => {
-        if (params && Number.isFinite(params[a])) return params[a] | 0;
-        if (params && Number.isFinite(params[b])) return params[b] | 0;
-        return def;
-    };
-    const tenkanLen = pick('tenkan', 'tenkanPeriod', 9);
-    const kijunLen = pick('kijun', 'kijunPeriod', 26);
-    const senkouBLen = pick('senkouB', 'senkouBPeriod', 52);
+export interface IchimokuParameters extends IndicatorParameters {
+    readonly tenkanLength: number;
+    readonly kijunLength: number;
+    readonly senkouBLength: number;
+}
 
-    if (!Array.isArray(candles) || candles.length === 0) {
-        return { tenkan: [], kijun: [], senkouA: [], senkouB: [], chikou: [] };
+export interface IchimokuCheckpoint {
+    readonly tenkanHigh: RollingWindowCheckpoint;
+    readonly tenkanLow: RollingWindowCheckpoint;
+    readonly kijunHigh: RollingWindowCheckpoint;
+    readonly kijunLow: RollingWindowCheckpoint;
+    readonly senkouBHigh: RollingWindowCheckpoint;
+    readonly senkouBLow: RollingWindowCheckpoint;
+}
+
+export class IchimokuProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    IchimokuCheckpoint
+> {
+    private readonly tenkanHigh: RollingMaximum;
+    private readonly tenkanLow: RollingMinimum;
+    private readonly kijunHigh: RollingMaximum;
+    private readonly kijunLow: RollingMinimum;
+    private readonly senkouBHigh: RollingMaximum;
+    private readonly senkouBLow: RollingMinimum;
+
+    constructor(
+        readonly tenkanLength: number,
+        readonly kijunLength: number,
+        readonly senkouBLength: number,
+    ) {
+        super(['tenkan', 'kijun', 'senkouA', 'senkouB', 'chikou']);
+        period(tenkanLength, tenkanLength, 1, 200, 'tenkanLength');
+        period(kijunLength, kijunLength, 1, 400, 'kijunLength');
+        period(senkouBLength, senkouBLength, 1, 400, 'senkouBLength');
+        this.tenkanHigh = new RollingMaximum(tenkanLength);
+        this.tenkanLow = new RollingMinimum(tenkanLength);
+        this.kijunHigh = new RollingMaximum(kijunLength);
+        this.kijunLow = new RollingMinimum(kijunLength);
+        this.senkouBHigh = new RollingMaximum(senkouBLength);
+        this.senkouBLow = new RollingMinimum(senkouBLength);
     }
 
-    const n = candles.length;
-    const tenkanRaw = midpointSeries(candles, tenkanLen);
-    const kijunRaw = midpointSeries(candles, kijunLen);
-    const senkouBRaw = midpointSeries(candles, senkouBLen);
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const close = finite(input.value?.close);
+        const tenkanHigh = commit ? this.tenkanHigh.push(high) : this.tenkanHigh.preview(high);
+        const tenkanLow = commit ? this.tenkanLow.push(low) : this.tenkanLow.preview(low);
+        const kijunHigh = commit ? this.kijunHigh.push(high) : this.kijunHigh.preview(high);
+        const kijunLow = commit ? this.kijunLow.push(low) : this.kijunLow.preview(low);
+        const senkouBHigh = commit
+            ? this.senkouBHigh.push(high)
+            : this.senkouBHigh.preview(high);
+        const senkouBLow = commit
+            ? this.senkouBLow.push(low)
+            : this.senkouBLow.preview(low);
 
-    // Senkou A raw = (Tenkan + Kijun) / 2, valid only once BOTH lines are
-    // formed (i.e. from max(tenkanLen, kijunLen) - 1). Senkou B raw is the
-    // senkouB-window midpoint (valid from senkouBLen - 1).
-    const senkouARaw = new Array(n);
-    for (let k = 0; k < n; k++) {
-        senkouARaw[k] = (tenkanRaw[k] !== null && kijunRaw[k] !== null)
-            ? (tenkanRaw[k] + kijunRaw[k]) / 2
-            : null;
-    }
-    const rawFirstA = Math.max(tenkanLen, kijunLen) - 1;
-    const rawFirstB = senkouBLen - 1;
-
-    const tenkan = new Array(n);
-    const kijun = new Array(n);
-    const senkouA = shiftForward(candles, senkouARaw, rawFirstA, kijunLen);
-    const senkouB = shiftForward(candles, senkouBRaw, rawFirstB, kijunLen);
-    const chikou = new Array(n);
-
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        tenkan[i] = { time: t, value: tenkanRaw[i] };
-        kijun[i] = { time: t, value: kijunRaw[i] };
-
-        // Chikou (IchimokuChinkouLine, Length = kijun): returns the current
-        // close, but the dumper gates each inner line on its own IsFormed, so
-        // the line stays null until the buffer fills (bar kijunLen-1).
-        const cc = candles[i] && candles[i].close;
-        chikou[i] = {
-            time: t,
-            value: (i >= kijunLen - 1 && typeof cc === 'number' && Number.isFinite(cc)) ? cc : null,
+        const tenkan = tenkanHigh === null || tenkanLow === null
+            ? null
+            : (tenkanHigh + tenkanLow) / 2;
+        const kijun = kijunHigh === null || kijunLow === null
+            ? null
+            : (kijunHigh + kijunLow) / 2;
+        const spanA = tenkan === null || kijun === null ? null : (tenkan + kijun) / 2;
+        const spanB = senkouBHigh === null || senkouBLow === null
+            ? null
+            : (senkouBHigh + senkouBLow) / 2;
+        const values: IndicatorOutputValue[] = [
+            this.output('tenkan', tenkan, input.index),
+            this.output('kijun', kijun, input.index),
+            ...this.forward('senkouA', spanA, Math.max(this.tenkanLength, this.kijunLength) - 1, input.index),
+            ...this.forward('senkouB', spanB, this.senkouBLength - 1, input.index),
+            this.output(
+                'chikou',
+                input.index >= this.kijunLength - 1 ? close : null,
+                input.index,
+            ),
+        ];
+        return {
+            isFormed: values.some((value) => value.value !== null),
+            values,
         };
     }
 
-    return { tenkan, kijun, senkouA, senkouB, chikou };
+    protected resetState(): void {
+        this.tenkanHigh.reset();
+        this.tenkanLow.reset();
+        this.kijunHigh.reset();
+        this.kijunLow.reset();
+        this.senkouBHigh.reset();
+        this.senkouBLow.reset();
+    }
+
+    protected captureState(): IchimokuCheckpoint {
+        return Object.freeze({
+            tenkanHigh: this.tenkanHigh.checkpoint(),
+            tenkanLow: this.tenkanLow.checkpoint(),
+            kijunHigh: this.kijunHigh.checkpoint(),
+            kijunLow: this.kijunLow.checkpoint(),
+            senkouBHigh: this.senkouBHigh.checkpoint(),
+            senkouBLow: this.senkouBLow.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: IchimokuCheckpoint): void {
+        if (!validWindow(state?.tenkanHigh, this.tenkanLength)
+            || !validWindow(state?.tenkanLow, this.tenkanLength)
+            || !validWindow(state?.kijunHigh, this.kijunLength)
+            || !validWindow(state?.kijunLow, this.kijunLength)
+            || !validWindow(state?.senkouBHigh, this.senkouBLength)
+            || !validWindow(state?.senkouBLow, this.senkouBLength)) {
+            throw new TypeError('sschart: invalid Ichimoku checkpoint');
+        }
+        this.tenkanHigh.restore(state.tenkanHigh);
+        this.tenkanLow.restore(state.tenkanLow);
+        this.kijunHigh.restore(state.kijunHigh);
+        this.kijunLow.restore(state.kijunLow);
+        this.senkouBHigh.restore(state.senkouBHigh);
+        this.senkouBLow.restore(state.senkouBLow);
+    }
+
+    private forward(
+        outputId: 'senkouA' | 'senkouB',
+        value: number | null,
+        rawFirst: number,
+        sourceIndex: number,
+    ): IndicatorOutputValue[] {
+        if (sourceIndex < rawFirst) return [];
+        if (sourceIndex === rawFirst) {
+            return [
+                this.output(outputId, value, sourceIndex + this.kijunLength - 1),
+                this.output(outputId, value, sourceIndex + this.kijunLength),
+            ];
+        }
+        return [this.output(outputId, value, sourceIndex + this.kijunLength)];
+    }
 }
 
-/**
- * Forward-shift a Senkou raw series exactly as StockSharp's
- * IchimokuSenkouA/BLine do it. Both lines buffer their raw value each final
- * bar (starting at `rawFirst`) and only start EMITTING once the buffer has
- * grown to `kijun` slots, then output the oldest buffered value (a `kijun`-bar
- * forward shift). Two consequences we reproduce bar-for-bar:
- *   - the first emit is at bar `rawFirst + (kijun - 1)`;
- *   - because the emit begins one bar before the buffer is full, the very
- *     first raw value is output TWICE (bars firstEmit and firstEmit+1) — i.e.
- *     the shifted source index is clamped at the bottom to `rawFirst`.
- * @param rawFirst first index at which `raw` is non-null
- * @param kijun forward-shift length (Kijun.Length)
- */
-function shiftForward(candles: CandlePoint[], raw: ReadonlyArray<number | null>, rawFirst: number, kijun: number): IndicatorPoint[] {
-    const n = candles.length;
-    const out = new Array(n);
-    const firstEmit = rawFirst + (kijun - 1);
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        if (i < firstEmit) { out[i] = { time: t, value: null }; continue; }
-        let src = i - kijun;
-        if (src < rawFirst) src = rawFirst;
-        const v = raw[src];
-        out[i] = { time: t, value: (typeof v === 'number' && Number.isFinite(v)) ? v : null };
-    }
-    return out;
-}
+export const IchimokuIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IchimokuParameters
+> = registerIndicator({
+    id: 'Ichimoku',
+    name: 'Ichimoku',
+    description: 'Ichimoku cloud with rolling high-low midpoints and forward Senkou spans.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        lengthParameter('tenkanLength', 'Tenkan', 9, 200),
+        lengthParameter('kijunLength', 'Kijun', 26, 400),
+        lengthParameter('senkouBLength', 'Senkou B', 52, 400),
+    ],
+    outputs: [
+        { id: 'tenkan', name: 'Tenkan', defaultStyle: lineStyle('#FF6347') },
+        { id: 'kijun', name: 'Kijun', defaultStyle: lineStyle('#1E90FF') },
+        {
+            id: 'senkouA',
+            name: 'Senkou A',
+            defaultStyle: {
+                series: IndicatorSeriesStyle.Band,
+                color: '#32CD32',
+                options: { priceLineVisible: false },
+            },
+        },
+        {
+            id: 'senkouB',
+            name: 'Senkou B',
+            defaultStyle: {
+                series: IndicatorSeriesStyle.Band,
+                color: '#FF1493',
+                options: { priceLineVisible: false },
+            },
+        },
+        {
+            id: 'chikou',
+            name: 'Chikou',
+            defaultStyle: lineStyle('#EE82EE', { lineStyle: 2 }),
+        },
+    ],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+    aliases: ['ichimoku'],
+    painter: 'ichimoku',
+    processorFactory: (parameters) => new IchimokuProcessor(
+        parameter(parameters, 'tenkanLength', 'tenkanPeriod', 9, 200),
+        parameter(parameters, 'kijunLength', 'kijunPeriod', 26, 400),
+        parameter(parameters, 'senkouBLength', 'senkouBPeriod', 52, 400),
+    ),
+});

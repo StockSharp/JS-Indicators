@@ -252,11 +252,9 @@ export class RollingLinearRegression {
     }
 
     private standardError(state: RegressionState): number | null {
-        if (state.size !== this.windowLength || state.invalid !== 0
-            || this.windowLength < 2) {
+        if (state.size !== this.windowLength || state.invalid !== 0)
             return null;
-        }
-        if (this.windowLength === 2) return 0;
+        if (this.windowLength <= 2) return 0;
         const slope = this.slope(state);
         if (slope === null) return null;
         const intercept = (

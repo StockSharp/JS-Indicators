@@ -1,25 +1,59 @@
-// Typical Price — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\TypicalPrice.cs.
-// Deviations from .cs: none. Per bar: (high + low + close) / 3.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    PRICE_LINE_STYLE,
+    typicalPrice,
+} from './shared/cumulative-price.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
+export class TypicalPriceProcessor extends SequentialIndicatorProcessor<IndicatorCandle, null> {
+    constructor() { super(['line']); }
 
-/**
- * @returns {IndicatorPoint[]}
- */
-export function calcTypicalPrice(candles: CandlePoint[], _params?: IndicatorParams) {
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const t = c && c.time;
-        const h = c && c.high;
-        const l = c && c.low;
-        const cl = c && c.close;
-        const ok = typeof h === 'number' && Number.isFinite(h)
-            && typeof l === 'number' && Number.isFinite(l)
-            && typeof cl === 'number' && Number.isFinite(cl);
-        out[i] = { time: t, value: ok ? (h + l + cl) / 3 : null };
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        _commit: boolean,
+    ): IndicatorCalculationResult {
+        const value = typicalPrice(input.value);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
     }
-    return out;
+
+    protected resetState(): void { /* stateless */ }
+    protected captureState(): null { return null; }
+    protected restoreState(state: null): void {
+        if (state !== null)
+            throw new TypeError('sschart: invalid Typical Price checkpoint');
+    }
 }
+
+export const TypicalPriceIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    IndicatorParameters
+> = registerIndicator({
+    id: 'TypicalPrice',
+    name: 'Typical Price',
+    description: 'Per-candle average of high, low and close prices.',
+    category: IndicatorCategory.Price,
+    input: CandlestickIndicatorInput,
+    parameters: [],
+    outputs: [{ id: 'line', name: 'Typical Price', defaultStyle: PRICE_LINE_STYLE }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['tp', 'typicalprice'],
+    processorFactory: () => new TypicalPriceProcessor(),
+});

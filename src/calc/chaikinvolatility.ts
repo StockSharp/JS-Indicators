@@ -1,104 +1,203 @@
-// Chaikin Volatility (Marc Chaikin).
-// Port of StockSharp Algo.Indicators ChaikinVolatility.cs — a two-stage
-// pipeline:
-//   1. EMA over per-bar (high - low) with length `emaLength`.
-//   2. Rate-of-change of that EMA with length `rocLength`:
-//      CV[i] = (ema[i] - ema[i - rocLength]) / ema[i - rocLength] * 100
-//
-// The .cs constructs both inner indicators with `new()`, so they take their own
-// StockSharp defaults: ExponentialMovingAverage.Length = 32 and RateOfChange
-// (Momentum) default Length = 5. Match those here so the periods line up with the
-// live C# (NumValuesToInitialize = 32 + 6 - 1 = 37 → first value at index 36).
-//
-// EMA uses calcEMA's seeding convention (SMA over first `emaLength` values), which
-// equals the StockSharp EMA at its first formed bar. Output first non-null at index
-// `emaLength + rocLength - 1`.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RingBuffer,
+    type RingBufferCheckpoint,
+} from '../math/index.js';
+import {
+    period,
+} from './shared/volatility.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
-
-/**
- * Local EMA over a (number|null)[] series. Seeded by SMA over the first
- * `length` finite values. Returns an array of (number|null), same length
- * as input. Any non-finite gap before seeding aborts the seed; after
- * seeding a non-finite value emits null at that position but keeps `prev`
- * intact for the next valid bar.
- * @param {(number|null)[]} values
- * @param {number} length
- * @returns {(number|null)[]}
- */
-function emaSeries(values: (number | null)[], length: number): (number | null)[] {
-    const n = values.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = null;
-    if (length <= 0) return out;
-
-    let seedSum = 0;
-    let seedCount = 0;
-    let seedDone = false;
-    let prev = 0;
-    const k = 2 / (length + 1);
-
-    for (let i = 0; i < n; i++) {
-        const v = values[i];
-        const ok = typeof v === 'number' && Number.isFinite(v);
-        if (!seedDone) {
-            if (!ok) continue;
-            seedSum += v;
-            seedCount++;
-            if (seedCount === length) {
-                prev = seedSum / length;
-                out[i] = prev;
-                seedDone = true;
-            }
-            continue;
-        }
-        if (!ok) continue;
-        prev = v * k + prev * (1 - k);
-        out[i] = prev;
-    }
-    return out;
+export interface ChaikinVolatilityParameters extends IndicatorParameters {
+    readonly emaLength: number;
+    readonly rocLength: number;
 }
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{emaLength?: number, rocLength?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcChaikinVolatility(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const emaLength = params && Number.isFinite(params.emaLength) ? (params.emaLength | 0) : 32;
-    const rocLength = params && Number.isFinite(params.rocLength) ? (params.rocLength | 0) : 5;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    if (emaLength <= 0 || rocLength <= 0) return out;
-
-    // Stage 1: EMA over per-bar (high - low).
-    const ranges = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        const h = c && c.high;
-        const l = c && c.low;
-        if (typeof h === 'number' && Number.isFinite(h) &&
-            typeof l === 'number' && Number.isFinite(l)) {
-            ranges[i] = h - l;
-        } else {
-            ranges[i] = null;
-        }
-    }
-    const ema = emaSeries(ranges, emaLength);
-
-    // Stage 2: ROC across rocLength bars of the EMA series.
-    //   ROC[i] = (ema[i] - ema[i - rocLength]) / ema[i - rocLength] * 100
-    for (let i = rocLength; i < n; i++) {
-        const cur = ema[i];
-        const old = ema[i - rocLength];
-        if (cur === null || old === null) continue;
-        if (old === 0) continue; // divide-by-zero guard, matches ROC.cs (returns null)
-        out[i] = { time: candles[i].time, value: (cur - old) / old * 100 };
-    }
-    return out;
+export interface ChaikinVolatilityCheckpoint {
+    readonly averageCount: number;
+    readonly averageSeedSum: number;
+    readonly averageFormed: boolean;
+    readonly averagePrevious: number;
+    readonly history: RingBufferCheckpoint<number | null>;
 }
+
+export interface AverageEvaluation {
+    readonly count: number;
+    readonly seedSum: number;
+    readonly formed: boolean;
+    readonly previous: number;
+    readonly value: number | null;
+}
+
+export class ChaikinVolatilityProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    ChaikinVolatilityCheckpoint
+> {
+    private averageCount = 0;
+    private averageSeedSum = 0;
+    private averageFormed = false;
+    private averagePrevious = 0;
+    private readonly history: RingBuffer<number | null>;
+
+    constructor(readonly emaLength: number, readonly rocLength: number) {
+        super(['line']);
+        if (!Number.isInteger(emaLength) || emaLength < 1)
+            throw new RangeError('sschart: Chaikin EMA length must be a positive integer');
+        if (!Number.isInteger(rocLength) || rocLength < 1)
+            throw new RangeError('sschart: Chaikin ROC length must be a positive integer');
+        this.history = new RingBuffer(rocLength + 1);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const range = high === null || low === null ? null : finite(high - low);
+        const evaluation = this.evaluateAverage(range);
+        const average = evaluation.value;
+        if (commit) {
+            this.averageCount = evaluation.count;
+            this.averageSeedSum = evaluation.seedSum;
+            this.averageFormed = evaluation.formed;
+            this.averagePrevious = evaluation.previous;
+        }
+        const past = this.history.size < this.rocLength
+            ? undefined
+            : this.history.at(this.history.size - this.rocLength);
+        const candidate = average !== null && typeof past === 'number' && past !== 0
+            ? (average - past) / past * 100
+            : null;
+        const value = finite(candidate);
+        if (commit) this.history.push(average);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.averageCount = 0;
+        this.averageSeedSum = 0;
+        this.averageFormed = false;
+        this.averagePrevious = 0;
+        this.history.clear();
+    }
+
+    protected captureState(): ChaikinVolatilityCheckpoint {
+        return Object.freeze({
+            averageCount: this.averageCount,
+            averageSeedSum: this.averageSeedSum,
+            averageFormed: this.averageFormed,
+            averagePrevious: this.averagePrevious,
+            history: this.history.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: ChaikinVolatilityCheckpoint): void {
+        const values = state?.history?.values;
+        if (state === null || typeof state !== 'object'
+            || !Array.isArray(values) || values.length > this.rocLength + 1
+            || values.some((value) => value !== null && finite(value) === null)
+            || !Number.isInteger(state.averageCount)
+            || state.averageCount < 0 || state.averageCount > this.emaLength
+            || finite(state.averageSeedSum) === null
+            || typeof state.averageFormed !== 'boolean'
+            || finite(state.averagePrevious) === null
+            || state.averageFormed !== (state.averageCount === this.emaLength)) {
+            throw new TypeError('sschart: invalid Chaikin Volatility checkpoint');
+        }
+        this.averageCount = state.averageCount;
+        this.averageSeedSum = state.averageSeedSum;
+        this.averageFormed = state.averageFormed;
+        this.averagePrevious = state.averagePrevious;
+        this.history.restore(state.history);
+    }
+
+    private evaluateAverage(value: number | null): AverageEvaluation {
+        if (value === null) {
+            return {
+                count: this.averageCount,
+                seedSum: this.averageSeedSum,
+                formed: this.averageFormed,
+                previous: this.averagePrevious,
+                value: null,
+            };
+        }
+        if (!this.averageFormed) {
+            const count = this.averageCount + 1;
+            const seedSum = this.averageSeedSum + value;
+            const formed = count === this.emaLength;
+            const previous = formed ? seedSum / this.emaLength : this.averagePrevious;
+            return { count, seedSum, formed, previous, value: formed ? previous : null };
+        }
+        const multiplier = 2 / (this.emaLength + 1);
+        const previous = value * multiplier + this.averagePrevious * (1 - multiplier);
+        return {
+            count: this.averageCount,
+            seedSum: this.averageSeedSum,
+            formed: true,
+            previous,
+            value: previous,
+        };
+    }
+}
+
+export const ChaikinVolatilityIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    ChaikinVolatilityParameters
+> = registerIndicator({
+    id: 'ChaikinVolatility',
+    name: 'Chaikin Volatility',
+    description: 'Rate of change of an exponential average of candle ranges.',
+    category: IndicatorCategory.Volatility,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'emaLength', name: 'EMA Length', type: IndicatorParameterType.Integer,
+            defaultValue: 32, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'rocLength', name: 'ROC Length', type: IndicatorParameterType.Integer,
+            defaultValue: 5, min: 1, max: 500, step: 1,
+        },
+    ],
+    outputs: [{
+        id: 'line',
+        name: 'Chaikin Volatility',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Line,
+            color: '#ab47bc',
+            lineWidth: 2,
+            options: { priceLineVisible: false },
+        },
+    }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+
+    aliases: ['chaikinvolatility'],
+    levels: [0],
+    processorFactory: (parameters) => new ChaikinVolatilityProcessor(
+        period(parameters?.emaLength, 32, 'emaLength'),
+        period(parameters?.rocLength, 5, 'rocLength'),
+    ),
+});

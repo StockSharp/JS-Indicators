@@ -144,8 +144,18 @@ function normalizeParameter(
         options = Object.freeze(normalized);
     }
 
+    let aliases: readonly string[] | undefined;
+    if (value.aliases !== undefined) {
+        if (!Array.isArray(value.aliases) || value.aliases.length === 0)
+            throw new TypeError(`sschart: indicator ${name}.aliases must not be empty`);
+        aliases = Object.freeze(value.aliases.map((alias, aliasIndex) => (
+            text(alias, `${name}.aliases[${aliasIndex}]`)
+        )));
+    }
+
     return Object.freeze({
         id: text(value.id, `${name}.id`),
+        ...(aliases === undefined ? {} : { aliases }),
         name: text(value.name, `${name}.name`),
         ...(value.description === undefined
             ? {}
@@ -270,6 +280,10 @@ function normalizeDefinition<TInput, TParameters extends IndicatorParameters>(
         ...(outputFactory === undefined ? {} : { outputFactory }),
         naturalPane: value.naturalPane,
         measure: value.measure,
+        ...(value.aliases === undefined ? {} : { aliases: Object.freeze([...value.aliases]) }),
+        ...(value.painter === undefined ? {} : { painter: value.painter }),
+        ...(value.scaleRange === undefined ? {} : { scaleRange: Object.freeze({ ...value.scaleRange }) }),
+        ...(value.levels === undefined ? {} : { levels: Object.freeze([...value.levels]) }),
         processorFactory: value.processorFactory,
     });
 }

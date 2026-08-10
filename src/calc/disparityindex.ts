@@ -1,48 +1,89 @@
-// Disparity Index indicator (Algo.Indicators/DisparityIndex.cs).
-// Single-output. Percentage difference between the close and its own
-// trailing SMA:
-//
-//   DPI[i] = (close[i] - SMA(close, length)[i]) / SMA × 100
-//
-// .cs extends SimpleMovingAverage directly — `base.OnProcessDecimal` is
-// the SMA and the override only fires after `IsFormed` is true. So warm-up
-// is identical to SMA: first non-null output at index `length - 1`.
-//
-// Notes:
-//   * If SMA is zero we'd divide by zero — .cs doesn't guard this case
-//     and would emit ±Infinity. We mirror that and emit `null` only when
-//     SMA itself is null (warm-up); a literal SMA == 0 falls through and
-//     produces Infinity. In practice closes are positive, so this is a
-//     theoretical edge case but worth documenting.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+    resolvedPeriod,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import { simpleMA } from './helpers.js';
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export class DisparityIndexProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    RollingWindowCheckpoint
+> {
+    private readonly average: SimpleMovingAverage;
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{length?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcDisparityIndex(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-    if (length <= 0) return out;
-
-    const closes = new Array(n);
-    for (let i = 0; i < n; i++) closes[i] = candles[i] && candles[i].close;
-
-    const sma = simpleMA(closes, length);
-    for (let i = 0; i < n; i++) {
-        const s = sma[i];
-        const c = closes[i];
-        if (s === null || s === undefined) continue;
-        if (typeof c !== 'number' || !Number.isFinite(c)) continue;
-        out[i] = { time: candles[i].time, value: (c - s) / s * 100 };
+    constructor(readonly length: number) {
+        super(['line']);
+        resolvedPeriod(length, length, 'length');
+        this.average = new SimpleMovingAverage(length);
     }
-    return out;
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const close = finite(input.value?.close);
+        const average = commit
+            ? this.average.push(close)
+            : this.average.preview(close);
+        const value = close === null || average === null || average === 0
+            ? null
+            : finite((close - average) / average * 100);
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void { this.average.reset(); }
+    protected captureState(): RollingWindowCheckpoint { return this.average.checkpoint(); }
+    protected restoreState(state: RollingWindowCheckpoint): void {
+        if (state === null || typeof state !== 'object'
+            || !Array.isArray(state.values) || state.values.length > this.length
+            || state.values.some((value) => value !== null && finite(value) === null)) {
+            throw new TypeError('sschart: invalid Disparity Index checkpoint');
+        }
+        this.average.restore(state);
+    }
 }
+
+export const DisparityIndexIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'DisparityIndex',
+    name: 'Disparity Index',
+    description: 'Percentage distance between the current close and its simple moving average.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14)],
+    outputs: [{ id: 'line', name: 'Disparity Index', defaultStyle: lineStyle('#26c6da') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['disparityindex'],
+    levels: [0],
+    processorFactory: (parameters) => new DisparityIndexProcessor(
+        resolvedLength(parameters, 14),
+    ),
+});

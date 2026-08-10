@@ -1,258 +1,337 @@
-// Parabolic SAR (Welles Wilder) — line-by-line port of
-// D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\ParabolicSar.cs.
-//
-// The C# implementation is unusual in several ways and we mirror them
-// exactly to match the reference data:
-//
-//   1. The internal `candles` list starts empty. The very first IsFinal=true
-//      call appends the candle TWICE (once because Count==0, again because
-//      isFinal). So after bar 0 we have [c0, c0]; bar 1 yields [c0, c0, c1].
-//      That means at bar 1 the list reaches Count==3 and the seed branch
-//      fires. _longPosition is `candles[^1].HighPrice > candles[^2].HighPrice`
-//      — i.e. c1.High > c0.High (the duplicated c0 is at index 1).
-//      Max/Min over the whole 3-element list reduces to Max/Min of (c0, c1).
-//
-//   2. Seed SAR formula: _xp + (longPosition ? -1 : 1) * (max - min) * _af,
-//      where _xp = max if long else min. Equivalent to "the opposite extreme
-//      shifted by af*(range) toward the EP" — emphatically NOT the simple
-//      "use opposite extreme" that a 2-bar seed would give.
-//
-//   3. From bar 2 onward, `_reverseBar != candles.Count` is the gate that
-//      runs the normal SAR step (plus its 2-bar clamp and bidirectional
-//      reversal check that can mutate state via Reverse()). On a reversal
-//      bar, the result is returned directly from Reverse() (skipping the
-//      regular value computation), and `_reverseBar = candles.Count` so the
-//      NEXT bar takes the `else` branch instead (no fresh _todaySar; the
-//      previous _prevSar is reused as `value`).
-//
-//   4. _prevValue is `GetCurrentValue()` (= last stored indicator output),
-//      taken at the top of each Calculate call. So _prevValue is *whatever
-//      we returned last bar*, not _prevSar (they can diverge after a
-//      reversal: the bar that flipped returns _xp via Reverse(), while
-//      _prevSar gets set to that same _xp).
-//
-// Default params per .cs ctor: Acceleration=0.02, AccelerationStep=0.02,
-// AccelerationMax=0.2.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    parameter,
+} from './shared/adaptive.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams, IndicatorPoint } from './types.js';
+export interface ParabolicSarParameters extends IndicatorParameters {
+    readonly acceleration: number;
+    readonly accelerationStep: number;
+    readonly accelerationMax: number;
+}
 
-/**
- * @typedef {object} CandlePoint
- * @property {string|number} time
- * @property {number} open
- * @property {number} high
- * @property {number} low
- * @property {number} close
- * @property {number} [volume]
- */
+export interface ParabolicSarCandleState {
+    readonly high: number;
+    readonly low: number;
+}
 
-/**
- * @typedef {{time: string|number, value: number|null}} IndicatorPoint
- */
+export interface ParabolicSarCheckpoint {
+    readonly validCandles: number;
+    readonly tail: readonly ParabolicSarCandleState[];
+    readonly longPosition: boolean;
+    readonly extremePoint: number;
+    readonly accelerationFactor: number;
+    readonly previousBar: number;
+    readonly accelerationIncreased: boolean;
+    readonly reverseBar: number;
+    readonly reverseValue: number;
+    readonly previousSar: number;
+    readonly todaySar: number;
+    readonly lastReturned: number;
+}
 
-/**
- * @param {CandlePoint[]} candles
- * @param {{acceleration?: number, accelerationMax?: number, accelerationStep?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
+export interface MutableParabolicSarState {
+    validCandles: number;
+    tail: ParabolicSarCandleState[];
+    longPosition: boolean;
+    extremePoint: number;
+    accelerationFactor: number;
+    previousBar: number;
+    accelerationIncreased: boolean;
+    reverseBar: number;
+    reverseValue: number;
+    previousSar: number;
+    todaySar: number;
+    lastReturned: number;
+}
 
-export function calcParabolicSAR(candles: CandlePoint[], params?: IndicatorParams): IndicatorPoint[] {
-    const acceleration = params && Number.isFinite(params.acceleration) ? +params.acceleration : 0.02;
-    const accelerationMax = params && Number.isFinite(params.accelerationMax) ? +params.accelerationMax : 0.2;
-    const accelerationStep = params && Number.isFinite(params.accelerationStep) ? +params.accelerationStep : 0.02;
+export function initialState(): MutableParabolicSarState {
+    return {
+        validCandles: 0,
+        tail: [],
+        longPosition: false,
+        extremePoint: 0,
+        accelerationFactor: 0,
+        previousBar: 0,
+        accelerationIncreased: false,
+        reverseBar: 0,
+        reverseValue: 0,
+        previousSar: 0,
+        todaySar: 0,
+        lastReturned: 0,
+    };
+}
 
-    if (!Array.isArray(candles) || candles.length === 0) return [];
+export class ParabolicSarProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    ParabolicSarCheckpoint
+> {
+    private state = initialState();
 
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i].time, value: null };
-
-    // Internal state (mirrors CalcBuffer struct fields).
-    /** @type {object[]} */
-    const list: CandlePoint[] = []; // _candles list inside ParabolicSar (with the bar-0 double-add quirk)
-    let longPosition = false;
-    let xp = 0;
-    let af = 0;
-    let prevBar = 0;
-    let afIncreased = false;
-    let reverseBar = 0;
-    let reverseValue = 0;
-    let prevSar = 0;
-    let todaySar = 0;
-    // _prevValue inside Calculate is GetCurrentValue() — the last *stored*
-    // indicator output. We treat 0/null as "no value" (C# returns
-    // DecimalIndicatorValue with no decimal when val==0).
-    let lastReturned = 0;
-
-    // TodaySar helper. Returns the adjusted SAR; may flip the trend via
-    // a Reverse() call (and mutates state accordingly).
-    function todaySarFn(candidate: number) {
-        if (longPosition) {
-            const tail1Low = list[list.length - 1].low;
-            const tail2Low = list[list.length - 2].low;
-            const lowestSar = Math.min(candidate, tail1Low, tail2Low);
-            if (list[list.length - 1].low > lowestSar) {
-                return lowestSar;
-            }
-            return reverseFn();
-        }
-        const tail1High = list[list.length - 1].high;
-        const tail2High = list[list.length - 2].high;
-        const highestSar = Math.max(candidate, tail1High, tail2High);
-        if (list[list.length - 1].high < highestSar) {
-            return highestSar;
-        }
-        return reverseFn();
+    constructor(
+        readonly acceleration: number,
+        readonly accelerationStep: number,
+        readonly accelerationMax: number,
+    ) {
+        super(['value']);
+        parameter(acceleration, acceleration, 0.0001, 10, 'acceleration');
+        parameter(accelerationStep, accelerationStep, 0.0001, 10, 'accelerationStep');
+        parameter(accelerationMax, accelerationMax, 0.0001, 10, 'accelerationMax');
     }
 
-    function reverseFn() {
-        let result = xp;
-        const tail1 = list[list.length - 1];
-        const shouldFlip =
-            (longPosition && prevSar > tail1.low) ||
-            (!longPosition && prevSar < tail1.high) ||
-            (prevBar !== list.length);
-        if (shouldFlip) {
-            longPosition = !longPosition;
-            reverseBar = list.length;
-            reverseValue = xp;
-            af = acceleration;
-            xp = longPosition ? tail1.high : tail1.low;
-            prevSar = result;
-        } else {
-            result = prevSar;
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        if (high === null || low === null) {
+            return {
+                isFormed: false,
+                values: [this.output('value', null, input.index)],
+            };
         }
-        return result;
+        const result = this.evaluate({ high, low });
+        if (commit) this.state = result.state;
+        return {
+            isFormed: result.value !== null,
+            values: [this.output('value', result.value, input.index)],
+        };
     }
 
-    function afIncrease() {
-        if (afIncreased) return;
-        af = Math.min(accelerationMax, af + accelerationStep);
-        afIncreased = true;
+    protected resetState(): void { this.state = initialState(); }
+
+    protected captureState(): ParabolicSarCheckpoint {
+        return Object.freeze({
+            ...this.state,
+            tail: Object.freeze(this.state.tail.map((candle) => Object.freeze({ ...candle }))),
+        });
     }
 
-    for (let i = 0; i < n; i++) {
-        const c = candles[i];
-        if (!c || !Number.isFinite(c.high) || !Number.isFinite(c.low)) {
-            out[i] = { time: c ? c.time : null, value: null };
-            // Still advance the candle list so indexing stays consistent.
-            // But C# would happily process NaN — we just skip emit on bad data.
-            continue;
+    protected restoreState(state: ParabolicSarCheckpoint): void {
+        const numeric = [
+            state?.extremePoint,
+            state?.accelerationFactor,
+            state?.reverseValue,
+            state?.previousSar,
+            state?.todaySar,
+            state?.lastReturned,
+        ];
+        if (state === null || typeof state !== 'object'
+            || !Number.isInteger(state.validCandles) || state.validCandles < 0
+            || !Array.isArray(state.tail) || state.tail.length > 3
+            || state.tail.length !== Math.min(3, state.validCandles)
+            || state.tail.some((candle) => candle === null || typeof candle !== 'object'
+                || finite(candle.high) === null || finite(candle.low) === null)
+            || typeof state.longPosition !== 'boolean'
+            || typeof state.accelerationIncreased !== 'boolean'
+            || !Number.isInteger(state.previousBar) || state.previousBar < 0
+            || !Number.isInteger(state.reverseBar) || state.reverseBar < 0
+            || numeric.some((value) => finite(value) === null)) {
+            throw new TypeError('sschart: invalid Parabolic SAR checkpoint');
+        }
+        this.state = {
+            ...state,
+            tail: state.tail.map((candle) => ({ ...candle })),
+        };
+    }
+
+    private evaluate(candle: ParabolicSarCandleState): {
+        readonly state: MutableParabolicSarState;
+        readonly value: number | null;
+    } {
+        const state: MutableParabolicSarState = {
+            ...this.state,
+            tail: this.state.tail.map((item) => ({ ...item })),
+        };
+        const append = (value: ParabolicSarCandleState) => {
+            state.validCandles += 1;
+            state.tail.push({ ...value });
+            if (state.tail.length > 3) state.tail.shift();
+        };
+        if (state.validCandles === 0) append(candle);
+        append(candle);
+
+        const current = () => state.tail[state.tail.length - 1];
+        const previous = () => state.tail[state.tail.length - 2];
+        const reverse = (): number => {
+            let result = state.extremePoint;
+            const latest = current();
+            const shouldFlip = (state.longPosition && state.previousSar > latest.low)
+                || (!state.longPosition && state.previousSar < latest.high)
+                || state.previousBar !== state.validCandles;
+            if (shouldFlip) {
+                state.longPosition = !state.longPosition;
+                state.reverseBar = state.validCandles;
+                state.reverseValue = state.extremePoint;
+                state.accelerationFactor = this.acceleration;
+                state.extremePoint = state.longPosition ? latest.high : latest.low;
+                state.previousSar = result;
+            } else result = state.previousSar;
+            return result;
+        };
+        const today = (candidate: number): number => {
+            const latest = current();
+            const prior = previous();
+            if (state.longPosition) {
+                const lowest = Math.min(candidate, latest.low, prior.low);
+                return latest.low > lowest ? lowest : reverse();
+            }
+            const highest = Math.max(candidate, latest.high, prior.high);
+            return latest.high < highest ? highest : reverse();
+        };
+        const increaseAcceleration = () => {
+            if (state.accelerationIncreased) return;
+            state.accelerationFactor = Math.min(
+                this.accelerationMax,
+                state.accelerationFactor + this.accelerationStep,
+            );
+            state.accelerationIncreased = true;
+        };
+
+        if (state.validCandles < 3) return { state, value: null };
+        if (state.validCandles === 3) {
+            const latest = current();
+            const prior = previous();
+            state.longPosition = latest.high > prior.high;
+            let maximum = -Infinity;
+            let minimum = Infinity;
+            for (const item of state.tail) {
+                maximum = Math.max(maximum, item.high);
+                minimum = Math.min(minimum, item.low);
+            }
+            state.extremePoint = state.longPosition ? maximum : minimum;
+            state.accelerationFactor = this.acceleration;
+            const value = state.extremePoint
+                + (state.longPosition ? -1 : 1)
+                    * (maximum - minimum) * state.accelerationFactor;
+            state.lastReturned = value;
+            return { state, value };
         }
 
-        // Mirror Calculate()'s candle-list maintenance (IsFinal=true path):
-        //   if (candles.Count == 0) candles.Add(candle);
-        //   if (isFinal) candles.Add(candle);
-        // → bar 0: appends twice; bars 1+: append once.
-        if (list.length === 0) list.push(c);
-        list.push(c);
-
-        // _prevValue = currentValue at top of Calculate.
-        const prevValue = lastReturned;
-
-        if (list.length < 3) {
-            // Not enough samples; return prevValue (which is 0 on bar 0).
-            // C# emits empty value when val==0 — we emit null.
-            // lastReturned stays at prevValue (==0).
-            out[i] = { time: c.time, value: null };
-            continue;
-        }
-
-        if (list.length === 3) {
-            // Seed branch (fires on bar 1).
-            const tailHi = list[list.length - 1].high;
-            const tail2Hi = list[list.length - 2].high;
-            longPosition = tailHi > tail2Hi;
-            let mx = -Infinity;
-            let mn = Infinity;
-            for (let k = 0; k < list.length; k++) {
-                if (list[k].high > mx) mx = list[k].high;
-                if (list[k].low < mn) mn = list[k].low;
+        if (state.accelerationIncreased && state.previousBar !== state.validCandles)
+            state.accelerationIncreased = false;
+        let value = state.lastReturned;
+        if (state.reverseBar !== state.validCandles) {
+            state.todaySar = today(
+                state.lastReturned + state.accelerationFactor
+                    * (state.extremePoint - state.lastReturned),
+            );
+            for (let offset = 1; offset <= 2; offset += 1) {
+                const prior = state.tail[state.tail.length - 1 - offset];
+                if (state.longPosition) {
+                    if (state.todaySar > prior.low) state.todaySar = prior.low;
+                } else if (state.todaySar < prior.high) state.todaySar = prior.high;
             }
-            xp = longPosition ? mx : mn;
-            af = acceleration;
-            const seedSar = xp + (longPosition ? -1 : 1) * (mx - mn) * af;
-            lastReturned = seedSar;
-            out[i] = { time: c.time, value: seedSar };
-            continue;
-        }
-
-        // Steady state.
-        if (afIncreased && prevBar !== list.length) afIncreased = false;
-
-        let value = prevValue;
-
-        if (reverseBar !== list.length) {
-            // Compute candidate SAR before clamping / reversal checks.
-            todaySar = todaySarFn(prevValue + af * (xp - prevValue));
-
-            // Clamp by the prior 2 bars' opposite extreme.
-            for (let x = 1; x <= 2; x++) {
-                const t = list[list.length - 1 - x];
-                if (longPosition) {
-                    if (todaySar > t.low) todaySar = t.low;
-                } else {
-                    if (todaySar < t.high) todaySar = t.high;
-                }
+            const latest = current();
+            const prior = previous();
+            const crossed = (state.longPosition
+                && (latest.low < state.todaySar || prior.low < state.todaySar))
+                || (!state.longPosition
+                    && (latest.high > state.todaySar || prior.high > state.todaySar));
+            if (crossed) {
+                value = reverse();
+                state.lastReturned = value;
+                state.previousBar = state.validCandles;
+                return { state, value };
             }
 
-            // Reversal trigger: if today's or yesterday's price crosses SAR.
-            const tail1 = list[list.length - 1];
-            const tail2 = list[list.length - 2];
-            const cross =
-                (longPosition && (tail1.low < todaySar || tail2.low < todaySar)) ||
-                (!longPosition && (tail1.high > todaySar || tail2.high > todaySar));
-
-            if (cross) {
-                const r = reverseFn();
-                lastReturned = r;
-                out[i] = { time: c.time, value: r };
-                prevBar = list.length;
-                continue;
-            }
-
-            if (longPosition) {
-                if (prevBar !== list.length || tail1.low < prevSar) {
-                    value = todaySar;
-                    prevSar = todaySar;
-                } else {
-                    value = prevSar;
-                }
-                if (tail1.high > xp) {
-                    xp = tail1.high;
-                    afIncrease();
+            if (state.longPosition) {
+                if (state.previousBar !== state.validCandles || latest.low < state.previousSar) {
+                    value = state.todaySar;
+                    state.previousSar = state.todaySar;
+                } else value = state.previousSar;
+                if (latest.high > state.extremePoint) {
+                    state.extremePoint = latest.high;
+                    increaseAcceleration();
                 }
             } else {
-                if (prevBar !== list.length || tail1.high > prevSar) {
-                    value = todaySar;
-                    prevSar = todaySar;
-                } else {
-                    value = prevSar;
-                }
-                if (tail1.low < xp) {
-                    xp = tail1.low;
-                    afIncrease();
+                if (state.previousBar !== state.validCandles || latest.high > state.previousSar) {
+                    value = state.todaySar;
+                    state.previousSar = state.todaySar;
+                } else value = state.previousSar;
+                if (latest.low < state.extremePoint) {
+                    state.extremePoint = latest.low;
+                    increaseAcceleration();
                 }
             }
         } else {
-            // Just-reversed bar — _reverseBar already equals current count.
-            const tail1 = list[list.length - 1];
-            if (longPosition && tail1.high > xp) {
-                xp = tail1.high;
-            } else if (!longPosition && tail1.low < xp) {
-                xp = tail1.low;
-            }
-            value = prevSar;
-            // Side-effect only; computed but not returned this bar.
-            todaySar = todaySarFn(
-                longPosition ? Math.min(reverseValue, tail1.low) : Math.max(reverseValue, tail1.high)
-            );
+            const latest = current();
+            if (state.longPosition && latest.high > state.extremePoint)
+                state.extremePoint = latest.high;
+            else if (!state.longPosition && latest.low < state.extremePoint)
+                state.extremePoint = latest.low;
+            value = state.previousSar;
+            state.todaySar = today(state.longPosition
+                ? Math.min(state.reverseValue, latest.low)
+                : Math.max(state.reverseValue, latest.high));
         }
-
-        prevBar = list.length;
-        lastReturned = value;
-        out[i] = { time: c.time, value };
+        state.previousBar = state.validCandles;
+        state.lastReturned = value;
+        return { state, value };
     }
-
-    return out;
 }
+
+export const ParabolicSarIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    ParabolicSarParameters
+> = registerIndicator({
+    id: 'ParabolicSar',
+    name: 'Parabolic SAR',
+    description: 'Wilder trend-following stop-and-reverse points.',
+    category: IndicatorCategory.Trend,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'acceleration', name: 'Acceleration', type: IndicatorParameterType.Number,
+            defaultValue: 0.02, min: 0.0001, max: 10, step: 0.001,
+        },
+        {
+            id: 'accelerationStep', name: 'Acceleration Step',
+            type: IndicatorParameterType.Number,
+            defaultValue: 0.02, min: 0.0001, max: 10, step: 0.001,
+        },
+        {
+            id: 'accelerationMax', name: 'Acceleration Max',
+            type: IndicatorParameterType.Number,
+            defaultValue: 0.2, min: 0.0001, max: 10, step: 0.01,
+        },
+    ],
+    outputs: [{
+        id: 'value',
+        name: 'SAR',
+        defaultStyle: {
+            series: IndicatorSeriesStyle.Markers,
+            color: '#ffca28',
+            options: { pointMarkersRadius: 3 },
+        },
+    }],
+    naturalPane: IndicatorPane.Overlay,
+    measure: IndicatorMeasure.Price,
+
+    aliases: ['psar', 'parabolicsar'],
+    painter: 'dots',
+    processorFactory: (parameters) => new ParabolicSarProcessor(
+        parameter(parameters?.acceleration, 0.02, 0.0001, 10, 'acceleration'),
+        parameter(parameters?.accelerationStep, 0.02, 0.0001, 10, 'accelerationStep'),
+        parameter(parameters?.accelerationMax, 0.2, 0.0001, 10, 'accelerationMax'),
+    ),
+});

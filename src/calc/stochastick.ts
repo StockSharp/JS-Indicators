@@ -1,48 +1,124 @@
-// Stochastic %K — JS port of D:\stocksharp\StockSharp (GitHub)\Algo.Indicators\StochasticK.cs.
-//
-// %K[i] = 100 * (close[i] - lowestLow(length)[i]) / (highestHigh(length)[i] - lowestLow(length)[i])
-// If high == low across the window, .cs returns 0 (not 100 — see line
-// `if (diff == 0) return 0;` in StochasticK.cs; note the full Stochastic
-// oscillator returns 100 in that case, but StochasticK alone returns 0).
-// Default Length = 14. Warm-up: first (length-1) values null.
-// Deviations from .cs: none — formula 1:1 (including the flat-range fallback
-// to 0, which differs from the StochasticOscillator companion class).
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    RollingMaximum,
+    RollingMinimum,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import {
+    MomentumLengthParameters,
+    lengthParameter,
+    lineStyle,
+    resolvedLength,
+} from './shared/momentum-volume.js';
+import {
+    finite,
+} from './shared/guards.js';
 
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-export function calcStochasticK(candles: CandlePoint[], params?: IndicatorParams) {
-    const length = params && Number.isFinite(params.length) ? (params.length | 0) : 14;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) out[i] = { time: candles[i] && candles[i].time, value: null };
-
-    if (length <= 0) return out;
-
-    for (let i = length - 1; i < n; i++) {
-        let lo = +Infinity;
-        let hi = -Infinity;
-        let bad = false;
-        for (let j = i - length + 1; j <= i; j++) {
-            const c = candles[j];
-            const h = c && c.high;
-            const l = c && c.low;
-            if (typeof h !== 'number' || !Number.isFinite(h) ||
-                typeof l !== 'number' || !Number.isFinite(l)) { bad = true; break; }
-            if (l < lo) lo = l;
-            if (h > hi) hi = h;
-        }
-        const close = candles[i] && candles[i].close;
-        if (bad || typeof close !== 'number' || !Number.isFinite(close)) continue;
-
-        const diff = hi - lo;
-        if (diff === 0) {
-            out[i] = { time: candles[i].time, value: 0 };
-        } else {
-            out[i] = { time: candles[i].time, value: 100 * (close - lo) / diff };
-        }
-    }
-    return out;
+export interface StochasticKCheckpoint {
+    readonly high: RollingWindowCheckpoint;
+    readonly low: RollingWindowCheckpoint;
 }
+
+export class StochasticKProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    StochasticKCheckpoint
+> {
+    private readonly high: RollingMaximum;
+    private readonly low: RollingMinimum;
+
+    constructor(readonly length: number) {
+        super(['line']);
+        if (!Number.isInteger(length) || length < 1 || length > 500) {
+            throw new RangeError(
+                'sschart: Stochastic K length must be an integer from 1 to 500',
+            );
+        }
+        this.high = new RollingMaximum(length);
+        this.low = new RollingMinimum(length);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = commit
+            ? this.high.push(finite(input.value?.high))
+            : this.high.preview(finite(input.value?.high));
+        const low = commit
+            ? this.low.push(finite(input.value?.low))
+            : this.low.preview(finite(input.value?.low));
+        const close = finite(input.value?.close);
+        let value: number | null = null;
+        if (high !== null && low !== null && close !== null) {
+            const range = high - low;
+            value = range === 0 ? 0 : finite(100 * (close - low) / range);
+        }
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.high.reset();
+        this.low.reset();
+    }
+
+    protected captureState(): StochasticKCheckpoint {
+        return Object.freeze({
+            high: this.high.checkpoint(),
+            low: this.low.checkpoint(),
+        });
+    }
+
+    protected restoreState(state: StochasticKCheckpoint): void {
+        const valid = (checkpoint: RollingWindowCheckpoint) => (
+            checkpoint !== null
+            && typeof checkpoint === 'object'
+            && Array.isArray(checkpoint.values)
+            && checkpoint.values.length <= this.length
+            && checkpoint.values.every((value) => value === null || finite(value) !== null)
+        );
+        if (state === null || typeof state !== 'object'
+            || !valid(state.high) || !valid(state.low)
+            || state.high.values.length !== state.low.values.length) {
+            throw new TypeError('sschart: invalid Stochastic K checkpoint');
+        }
+        this.high.restore(state.high);
+        this.low.restore(state.low);
+    }
+}
+
+export const StochasticKIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    MomentumLengthParameters
+> = registerIndicator({
+    id: 'StochasticK',
+    name: 'Stochastic K',
+    description: 'Close position within the trailing high-low range as raw stochastic %K.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [lengthParameter(14)],
+    outputs: [{ id: 'line', name: '%K', defaultStyle: lineStyle('#42a5f5') }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.Percent,
+    aliases: ['stochastick'],
+    scaleRange: { min: 0, max: 100 },
+    levels: [20, 80],
+    processorFactory: (parameters) => new StochasticKProcessor(
+        resolvedLength(parameters, 14),
+    ),
+});

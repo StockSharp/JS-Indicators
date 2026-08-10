@@ -1,53 +1,137 @@
-// Acceleration / Deceleration (Bill Williams).
-//   AO[i] = SMA(median, 5)[i] - SMA(median, 34)[i]      (Awesome Oscillator)
-//   AC[i] = AO[i] - SMA(AO, 5)[i]
-// Port of StockSharp Algo.Indicators Acceleration.cs: it composes the
-// AwesomeOscillator indicator with an SMA(5) of AO values. We do the same:
-// reuse the already-ported calcAwesomeOscillator and feed its output through
-// the simpleMA helper.
-//
-// Warm-up: AO with default 5/34 lands its first non-null at index 33. Then
-// SMA-5 over AO needs 5 more non-null AO points → first non-null AC at
-// index 37 with defaults. NumValuesToInitialize in .cs is AO+SMA-1.
+import {
+    CandlestickIndicatorInput,
+    IndicatorCategory,
+    IndicatorMeasure,
+    IndicatorPane,
+    IndicatorParameterType,
+    IndicatorSeriesStyle,
+    type IndicatorCandle,
+    type IndicatorDefinition,
+    type IndicatorParameters,
+    type IndicatorProcessInput,
+} from '../indicator-definition.js';
+import { registerIndicator } from '../indicator-registry.js';
+import {
+    SequentialIndicatorProcessor,
+    type IndicatorCalculationResult,
+} from '../sequential-processor.js';
+import {
+    SimpleMovingAverage,
+    type RollingWindowCheckpoint,
+} from '../math/index.js';
+import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import {
+    style,
+} from './shared/compound.js';
+import {
+    finite,
+    integer,
+    number,
+} from './shared/guards.js';
 
-import { simpleMA } from './helpers.js';
-import { calcAwesomeOscillator } from './awesomeoscillator.js';
-import type { CandlePoint, IndicatorParams } from './types.js';
-
-/**
- * @param {CandlePoint[]} candles
- * @param {{shortLength?: number, longLength?: number, smaLength?: number}} [params]
- * @returns {IndicatorPoint[]}
- */
-export function calcAcceleration(candles: CandlePoint[], params?: IndicatorParams) {
-    const shortLength = params && Number.isFinite(params.shortLength) ? (params.shortLength | 0) : 5;
-    const longLength = params && Number.isFinite(params.longLength) ? (params.longLength | 0) : 34;
-    const smaLength = params && Number.isFinite(params.smaLength) ? (params.smaLength | 0) : 5;
-
-    if (!Array.isArray(candles) || candles.length === 0) return [];
-
-    const n = candles.length;
-    const ao = calcAwesomeOscillator(candles, { shortLength, longLength });
-
-    // Extract AO numeric series (null → NaN so simpleMA's invalid-counter trips).
-    const aoVals = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const v = ao[i] && ao[i].value;
-        aoVals[i] = (typeof v === 'number' && Number.isFinite(v)) ? v : NaN;
-    }
-
-    const aoSma = simpleMA(aoVals, smaLength);
-
-    const out = new Array(n);
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        const a = ao[i] && ao[i].value;
-        const s = aoSma[i];
-        if (typeof a !== 'number' || !Number.isFinite(a) || s === null) {
-            out[i] = { time: t, value: null };
-        } else {
-            out[i] = { time: t, value: a - s };
-        }
-    }
-    return out;
+export interface AccelerationParameters extends IndicatorParameters {
+    readonly shortMaLength: number;
+    readonly longMaLength: number;
+    readonly smaLength: number;
 }
+
+export interface AccelerationCheckpoint {
+    readonly short: RollingWindowCheckpoint;
+    readonly long: RollingWindowCheckpoint;
+    readonly average: RollingWindowCheckpoint;
+}
+
+export class AccelerationProcessor extends SequentialIndicatorProcessor<
+    IndicatorCandle,
+    AccelerationCheckpoint
+> {
+    private readonly short: SimpleMovingAverage;
+    private readonly long: SimpleMovingAverage;
+    private readonly average: SimpleMovingAverage;
+
+    constructor(
+        readonly shortMaLength: number,
+        readonly longMaLength: number,
+        readonly smaLength: number,
+    ) {
+        super(['line']);
+        this.short = new SimpleMovingAverage(shortMaLength);
+        this.long = new SimpleMovingAverage(longMaLength);
+        this.average = new SimpleMovingAverage(smaLength);
+    }
+
+    protected calculate(
+        input: IndicatorProcessInput<IndicatorCandle>,
+        commit: boolean,
+    ): IndicatorCalculationResult {
+        const high = finite(input.value?.high);
+        const low = finite(input.value?.low);
+        const median = high === null || low === null ? null : (high + low) / 2;
+        const short = commit ? this.short.push(median) : this.short.preview(median);
+        const long = commit ? this.long.push(median) : this.long.preview(median);
+        const awesome = short === null || long === null ? null : short - long;
+        const average = commit
+            ? this.average.push(awesome)
+            : this.average.preview(awesome);
+        const value = awesome === null || average === null ? null : awesome - average;
+        return {
+            isFormed: value !== null,
+            values: [this.output('line', value, input.index)],
+        };
+    }
+
+    protected resetState(): void {
+        this.short.reset();
+        this.long.reset();
+        this.average.reset();
+    }
+    protected captureState(): AccelerationCheckpoint {
+        return Object.freeze({
+            short: this.short.checkpoint(),
+            long: this.long.checkpoint(),
+            average: this.average.checkpoint(),
+        });
+    }
+    protected restoreState(state: AccelerationCheckpoint): void {
+        if (state === null || typeof state !== 'object')
+            throw new TypeError('sschart: invalid Acceleration checkpoint');
+        this.short.restore(state.short);
+        this.long.restore(state.long);
+        this.average.restore(state.average);
+    }
+}
+
+export const AccelerationIndicator: IndicatorDefinition<
+    IndicatorCandle,
+    AccelerationParameters
+> = registerIndicator({
+    id: 'Acceleration',
+    name: 'Acceleration',
+    description: 'Awesome Oscillator displacement from its own moving average.',
+    category: IndicatorCategory.Momentum,
+    input: CandlestickIndicatorInput,
+    parameters: [
+        {
+            id: 'shortMaLength', name: 'Short Length', type: IndicatorParameterType.Integer,
+            defaultValue: 5, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'longMaLength', name: 'Long Length', type: IndicatorParameterType.Integer,
+            defaultValue: 34, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'smaLength', name: 'Average Length', type: IndicatorParameterType.Integer,
+            defaultValue: 5, min: 1, max: 500, step: 1,
+        },
+    ],
+    outputs: [{ id: 'line', name: 'Acceleration', defaultStyle: style(IndicatorSeriesStyle.Line, '#ff7043', 2) }],
+    naturalPane: IndicatorPane.Separate,
+    measure: IndicatorMeasure.MinusOnePlusOne,
+    aliases: ['ac', 'acceleration'],
+    levels: [0],
+    processorFactory: (parameters) => new AccelerationProcessor(
+        integer(parameters?.shortMaLength, 5, 1, 500, 'shortMaLength'),
+        integer(parameters?.longMaLength, 34, 1, 500, 'longMaLength'),
+        integer(parameters?.smaLength, 5, 1, 500, 'smaLength'),
+    ),
+});

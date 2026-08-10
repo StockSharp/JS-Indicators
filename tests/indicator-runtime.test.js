@@ -97,7 +97,7 @@ function definition(shift = 0) {
             defaultStyle: { series: IndicatorSeriesStyle.Line },
         }],
         naturalPane: IndicatorPane.Separate,
-        measure: IndicatorMeasure.Absolute,
+        measure: IndicatorMeasure.Price,
         processorFactory: () => new SumProcessor(shift),
     };
 }
