@@ -52,7 +52,7 @@ export class LinearRegressionForecastProcessor extends SequentialIndicatorProces
             value = this.regression.previewNext(close(input));
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.regression.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -14,7 +14,6 @@ import {
     SequentialIndicatorProcessor,
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import { RingBuffer, type RingBufferCheckpoint } from '../math/index.js';
 import {
     CompoundLengthParameters,
@@ -25,7 +24,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface TrixCheckpoint {
@@ -72,15 +70,12 @@ export class TrixProcessor extends SequentialIndicatorProcessor<
             ? this.third.push(thirdInput)
             : this.third.preview(thirdInput);
 
-        const history = [...this.rateOfChange.checkpoint().values];
-        if (third !== null && this.third.isFormed) {
-            if (history.length >= this.rocLength + 1) history.shift();
-            history.push(third);
-            if (commit) this.rateOfChange.push(third);
-        }
-        const formed = history.length > this.rocLength;
-        const reference = history[0];
-        const value = formed && third !== null && reference !== 0
+        if (commit && third !== null && this.third.isFormed)
+            this.rateOfChange.push(third);
+        const formed = this.rateOfChange.size > this.rocLength;
+        const reference = this.rateOfChange.front();
+        const value = formed && third !== null
+            && typeof reference === 'number' && reference !== 0
             ? 1_000 * (third - reference) / reference
             : null;
         return {

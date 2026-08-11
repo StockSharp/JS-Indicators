@@ -68,7 +68,7 @@ export class HighLowIndexProcessor extends SequentialIndicatorProcessor<
             value = range === 0 ? 50 : finite((currentHigh - minimum) / range * 100);
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.high.isFormed && this.low.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

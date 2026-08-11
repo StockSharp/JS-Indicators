@@ -43,7 +43,7 @@ export class SumProcessor extends SequentialIndicatorProcessor<
             ? this.sum.push(close(input))
             : this.sum.preview(close(input));
         return {
-            isFormed: this.sum.isFormed || value !== null,
+            isFormed: this.sum.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -13,9 +13,6 @@ import {
     ZigZagFamilyProcessor,
     ZigZagParameters,
 } from './shared/shifted-sparse.js';
-import {
-    finite,
-} from './shared/guards.js';
 
 export class ZigZagProcessor extends ZigZagFamilyProcessor {
     constructor(deviation: number) { super(deviation, 'close', 'both'); }

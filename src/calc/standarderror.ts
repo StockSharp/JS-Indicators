@@ -52,7 +52,7 @@ export class StandardErrorProcessor extends SequentialIndicatorProcessor<
             value = this.regression.previewStandardError(close(input));
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.regression.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

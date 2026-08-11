@@ -43,7 +43,7 @@ export class MeanDeviationProcessor extends SequentialIndicatorProcessor<
             ? this.deviation.push(close(input))
             : this.deviation.preview(close(input));
         return {
-            isFormed: this.deviation.isFormed || value !== null,
+            isFormed: this.deviation.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

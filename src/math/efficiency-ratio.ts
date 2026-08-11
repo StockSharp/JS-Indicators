@@ -60,29 +60,17 @@ export class RollingEfficiencyRatio {
 
     preview(value: NumericValue): number | null {
         const incoming = numeric(value);
-        const full = this.values.full;
-        const outgoing = full ? this.values.front() : undefined;
-        const invalid = this.invalid
-            - (full && outgoing === null ? 1 : 0)
-            + (incoming === null ? 1 : 0);
+        if (!this.values.full || this.invalid !== 0 || incoming === null) return null;
+
+        // StockSharp does not replace the oldest committed sample for a non-final
+        // value. It measures the preview from the current front and extends the
+        // committed path by one segment from the current back.
         let volatility = this.volatility;
-        if (full && this.windowLength > 1) {
-            const second = this.values.at(1);
-            if (outgoing !== null && outgoing !== undefined
-                && second !== null && second !== undefined) {
-                volatility -= Math.abs(second - outgoing);
-            }
-        }
         const previous = this.values.back();
-        if (this.windowLength > 1 && previous !== null && previous !== undefined
-            && incoming !== null) {
+        if (previous !== null && previous !== undefined) {
             volatility += Math.abs(incoming - previous);
         }
-        const size = Math.min(this.windowLength, this.values.size + 1);
-        if (size !== this.windowLength || invalid !== 0 || incoming === null) return null;
-        const oldest = full
-            ? (this.windowLength === 1 ? incoming : this.values.at(1))
-            : (this.values.front() ?? incoming);
+        const oldest = this.values.front();
         if (oldest === null || oldest === undefined) return null;
         volatility = Math.max(0, volatility);
         return volatility === 0 ? 0 : Math.abs(incoming - oldest) / volatility;

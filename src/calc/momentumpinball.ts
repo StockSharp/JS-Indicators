@@ -56,14 +56,18 @@ export class MomentumPinballProcessor extends SequentialIndicatorProcessor<
             };
         }
 
-        const minimum = commit ? this.minimum.push(price) : this.minimum.preview(price);
-        const maximum = commit ? this.maximum.push(price) : this.maximum.preview(price);
-        const nextSize = Math.min(this.length, this.values.size + 1);
+        const minimum = commit ? this.minimum.push(price) : this.minimum.value;
+        const maximum = commit ? this.maximum.push(price) : this.maximum.value;
+        const formed = commit
+            ? this.values.full || this.values.size + 1 === this.length
+            : this.values.full;
         let oldest: number | null = null;
-        if (nextSize === this.length) {
-            oldest = this.values.full
-                ? (this.length === 1 ? price : (this.values.at(1) as number))
-                : (this.values.front() ?? price);
+        if (formed) {
+            oldest = commit
+                ? this.values.full
+                    ? (this.length === 1 ? price : (this.values.at(1) as number))
+                    : (this.values.front() ?? price)
+                : (this.values.front() ?? null);
         }
         if (commit) this.values.push(price);
 
@@ -73,7 +77,7 @@ export class MomentumPinballProcessor extends SequentialIndicatorProcessor<
             value = range === 0 ? 0 : finite((price - oldest) / range * 100);
         }
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }

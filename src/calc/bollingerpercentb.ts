@@ -19,7 +19,6 @@ import {
     RollingStandardDeviation,
     SimpleMovingAverage,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     BollingerBandsCheckpoint,
     style,
@@ -55,8 +54,10 @@ export class BollingerPercentBProcessor extends SequentialIndicatorProcessor<
         commit: boolean,
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
-        const middle = commit ? this.average.push(close) : this.average.preview(close);
-        const deviation = commit ? this.deviation.push(close) : this.deviation.preview(close);
+        // BollingerBand reads the committed current values of its shared MA and
+        // deviation. Their non-final calculations do not become the band values.
+        const middle = commit ? this.average.push(close) : this.average.value;
+        const deviation = commit ? this.deviation.push(close) : this.deviation.value;
         const formed = close !== null && middle !== null && deviation !== null;
         const width = formed ? 2 * this.stdDevMultiplier * deviation : 0;
         const value = formed && width !== 0

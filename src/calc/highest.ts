@@ -12,7 +12,6 @@ import {
     HighestProcessor,
     LENGTH_STYLE,
     LengthIndicatorParameters,
-    close,
     resolvedLength,
 } from './shared/core.js';
 

@@ -74,8 +74,9 @@ export class EhlersFisherTransformProcessor extends SequentialIndicatorProcessor
             this.previousValue = nextValue;
             this.previousFisher = main;
         }
+        const formsNow = commit && main !== null;
         return {
-            isFormed: main !== null,
+            isFormed: formsNow,
             values: [
                 this.output('main', main, input.index),
                 this.output('trigger', trigger, input.index),

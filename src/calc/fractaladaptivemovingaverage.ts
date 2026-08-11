@@ -54,7 +54,7 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
 
     constructor(readonly length: number) {
         super(['line']);
-        integer(length, length, 1, 500, 'length');
+        integer(length, length, 4, 500, 'length');
         this.period = Math.floor(length / 3);
         this.remaining = length - this.period * 2;
         this.closes = new RingBuffer(length);
@@ -199,7 +199,7 @@ export const FractalAdaptiveMovingAverageIndicator: IndicatorDefinition<
     input: CandlestickIndicatorInput,
     parameters: [{
         id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
-        defaultValue: 20, min: 1, max: 500, step: 1,
+        defaultValue: 20, min: 4, max: 500, step: 1,
     }],
     outputs: [{
         id: 'line', name: 'FRAMA',
@@ -215,6 +215,6 @@ export const FractalAdaptiveMovingAverageIndicator: IndicatorDefinition<
 
     aliases: ['frama'],
     processorFactory: (parameters) => new FractalAdaptiveMovingAverageProcessor(
-        integer(parameters?.length, 20, 1, 500, 'length'),
+        integer(parameters?.length, 20, 4, 500, 'length'),
     ),
 });

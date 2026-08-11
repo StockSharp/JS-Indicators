@@ -24,14 +24,12 @@ import {
     type PartialRelativeStrengthIndexCheckpoint,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     style,
 } from './shared/compound.js';
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface ConstanceBrownCompositeIndexParameters extends IndicatorParameters {
@@ -121,9 +119,14 @@ export class ConstanceBrownCompositeIndexProcessor extends SequentialIndicatorPr
             ? this.slowSma.push(composite)
             : this.slowSma.preview(composite);
         return {
-            isFormed: composite !== null && fastSma !== null && slowSma !== null,
+            isFormed: this.fastSma.isFormed && this.slowSma.isFormed,
             values: [
-                this.formedOutput('composite', composite, input.index >= this.combinedBar, input.index),
+                this.formedOutput(
+                    'composite',
+                    composite,
+                    commit && input.index >= this.combinedBar,
+                    input.index,
+                ),
                 this.formedOutput('fastSma', fastSma, this.fastSma.isFormed, input.index),
                 this.formedOutput('slowSma', slowSma, this.slowSma.isFormed, input.index),
             ],

@@ -80,7 +80,7 @@ export class RankCorrelationIndexProcessor extends SequentialIndicatorProcessor<
             : null;
         if (commit) this.prices.push(close);
         return {
-            isFormed: value !== null,
+            isFormed: this.prices.full,
             values: [this.output('line', value, input.index)],
         };
     }

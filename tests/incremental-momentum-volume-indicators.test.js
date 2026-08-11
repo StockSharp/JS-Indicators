@@ -259,7 +259,7 @@ describe('incremental momentum and volume indicators', () => {
         assert.equal(processor.position, 0);
         assert.deepEqual(preview.values[0], {
             outputId: 'value',
-            value: 50,
+            value: null,
             targetIndex: 0,
             metadata: { up: true },
         });

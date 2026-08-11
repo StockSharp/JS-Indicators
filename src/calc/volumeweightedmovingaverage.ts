@@ -62,7 +62,7 @@ export class VolumeWeightedMovingAverageProcessor extends SequentialIndicatorPro
             ? numerator / denominator
             : null;
         return {
-            isFormed: value !== null,
+            isFormed: this.numerator.isFormed && this.denominator.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

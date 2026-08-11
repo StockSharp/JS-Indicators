@@ -49,12 +49,20 @@ export class WilliamsRProcessor extends SequentialIndicatorProcessor<
         input: IndicatorProcessInput<IndicatorCandle>,
         commit: boolean,
     ): IndicatorCalculationResult {
+        const incomingHigh = finite(input.value?.high);
+        const incomingLow = finite(input.value?.low);
+        const currentHigh = this.high.partialValue;
+        const currentLow = this.low.partialValue;
         const high = commit
-            ? this.high.push(finite(input.value?.high))
-            : this.high.preview(finite(input.value?.high));
+            ? this.high.push(incomingHigh)
+            : incomingHigh === null
+                ? null
+                : currentHigh === null ? incomingHigh : Math.max(currentHigh, incomingHigh);
         const low = commit
-            ? this.low.push(finite(input.value?.low))
-            : this.low.preview(finite(input.value?.low));
+            ? this.low.push(incomingLow)
+            : incomingLow === null
+                ? null
+                : currentLow === null ? incomingLow : Math.min(currentLow, incomingLow);
         const close = finite(input.value?.close);
         let value: number | null = null;
         if (high !== null && low !== null && close !== null) {
@@ -64,7 +72,7 @@ export class WilliamsRProcessor extends SequentialIndicatorProcessor<
             if (range !== 0) value = -100 * (high - close) / range;
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.low.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

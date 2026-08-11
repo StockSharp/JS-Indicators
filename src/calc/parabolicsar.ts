@@ -109,11 +109,11 @@ export class ParabolicSarProcessor extends SequentialIndicatorProcessor<
                 values: [this.output('value', null, input.index)],
             };
         }
-        const result = this.evaluate({ high, low });
+        const result = this.evaluate({ high, low }, commit);
         if (commit) this.state = result.state;
         const value = result.value === 0 ? null : result.value;
         return {
-            isFormed: true,
+            isFormed: commit,
             values: [this.output('value', value, input.index)],
         };
     }
@@ -155,7 +155,7 @@ export class ParabolicSarProcessor extends SequentialIndicatorProcessor<
         };
     }
 
-    private evaluate(candle: ParabolicSarCandleState): {
+    private evaluate(candle: ParabolicSarCandleState, commit: boolean): {
         readonly state: MutableParabolicSarState;
         readonly value: number | null;
     } {
@@ -168,8 +168,15 @@ export class ParabolicSarProcessor extends SequentialIndicatorProcessor<
             state.tail.push({ ...value });
             if (state.tail.length > 3) state.tail.shift();
         };
-        if (state.validCandles === 0) append(candle);
-        append(candle);
+        if (commit) {
+            if (state.validCandles === 0) append(candle);
+            append(candle);
+        } else if (state.validCandles === 0) {
+            state.validCandles = 1;
+            state.tail = [{ ...candle }];
+        } else {
+            state.tail = [...state.tail.slice(1), { ...candle }];
+        }
 
         const current = () => state.tail[state.tail.length - 1];
         const previous = () => state.tail[state.tail.length - 2];

@@ -75,7 +75,7 @@ export class HighestProcessor extends SequentialIndicatorProcessor<
             ? this.maximum.push(close)
             : this.maximum.preview(close);
         return {
-            isFormed: this.maximum.isFormed || value !== null,
+            isFormed: this.maximum.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -106,7 +106,7 @@ export class SmoothedMovingAverageProcessor extends SequentialIndicatorProcessor
             ? this.average.push(close(input))
             : this.average.preview(close(input));
         return {
-            isFormed: this.average.isFormed || value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -52,7 +52,7 @@ export class LinearRegressionRSquaredProcessor extends SequentialIndicatorProces
             value = this.regression.previewRSquared(close(input));
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.regression.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

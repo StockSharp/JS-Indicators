@@ -18,10 +18,8 @@ import {
     type RollingWindowCheckpoint,
 } from '../math/index.js';
 import {
-    HighestProcessor,
     LENGTH_STYLE,
     LengthIndicatorParameters,
-    close,
     resolvedLength,
 } from './shared/core.js';
 
@@ -46,7 +44,7 @@ export class LowestProcessor extends SequentialIndicatorProcessor<
             ? this.minimum.push(close)
             : this.minimum.preview(close);
         return {
-            isFormed: this.minimum.isFormed || value !== null,
+            isFormed: this.minimum.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

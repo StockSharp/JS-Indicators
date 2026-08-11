@@ -42,7 +42,7 @@ export class AverageTrueRangeProcessor extends SequentialIndicatorProcessor<
             ? this.average.push(input.value)
             : this.average.preview(input.value);
         return {
-            isFormed: this.average.isFormed || value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

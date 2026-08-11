@@ -22,7 +22,6 @@ import {
 import {
     finite,
     length,
-    number,
 } from './shared/guards.js';
 
 export class AroonOscillatorProcessor extends SequentialIndicatorProcessor<
@@ -48,8 +47,9 @@ export class AroonOscillatorProcessor extends SequentialIndicatorProcessor<
         const value = aroon.up === null || aroon.down === null
             ? null
             : aroon.up - aroon.down;
+        const formed = this.aroon.checkpoint().highs.length === this.length;
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }

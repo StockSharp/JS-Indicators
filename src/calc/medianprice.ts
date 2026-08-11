@@ -31,7 +31,7 @@ export class MedianPriceProcessor extends SequentialIndicatorProcessor<Indicator
         const low = finite(input.value?.low);
         const value = high === null || low === null ? null : (high + low) / 2;
         return {
-            isFormed: value !== null,
+            isFormed: _commit,
             values: [this.output('line', value, input.index)],
         };
     }

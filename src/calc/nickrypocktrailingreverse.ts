@@ -122,7 +122,7 @@ export class NickRypockTrailingReverseProcessor extends SequentialIndicatorProce
             this.validCount = validCount;
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.validCount >= this.length,
             values: [this.output('line', value, input.index)],
         };
     }

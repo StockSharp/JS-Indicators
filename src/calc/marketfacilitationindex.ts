@@ -36,8 +36,9 @@ export class MarketFacilitationIndexProcessor extends SequentialIndicatorProcess
         const value = high === null || low === null || volume === null || volume === 0
             ? null
             : finite((high - low) / volume);
+        const formsNow = _commit && value !== null;
         return {
-            isFormed: value !== null,
+            isFormed: formsNow,
             values: [this.output('line', value, input.index)],
         };
     }

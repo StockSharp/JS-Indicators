@@ -209,8 +209,8 @@ describe('indicator contract: the forming candle', () => {
             `${broken.length} indicators keep something from a preview in their committed line:\n` + broken.join('\n'));
     });
 
-    it('a preview moves whatever a committed bar of the same shape moves', () => {
-        const stuck = [];
+    it('successive previews reproduce independent previews', () => {
+        const broken = [];
 
         // Two last bars as different as a bar can be: both ends of the range and the volume.
         const history = SERIES.slice(0, SERIES.length - 1);
@@ -220,36 +220,30 @@ describe('indicator contract: the forming candle', () => {
 
         for (const definition of definitions) {
             try {
-                // What the indicator does with those two bars when they are FINAL. If it answers
-                // the same either way it does not read the fields that differ -- LunarPhase reads
-                // the clock, a volume index ignores the price -- and there is nothing for a
-                // preview to move. Derived rather than listed by name, so an indicator that stops
-                // reading the price is caught instead of sitting on an allow-list.
-                const committed = (bar) => {
+                const independent = (bar) => {
                     const runtime = build(definition);
                     for (const b of history) runtime.update({ time: b.time, value: b }, true);
-                    runtime.update({ time: bar.time, value: bar }, true);
+                    runtime.update({ time: bar.time, value: bar }, false);
                     return snapshot(runtime, definition).join('|');
                 };
-                if (committed(down) === committed(up)) continue;
 
                 const runtime = build(definition);
                 for (const b of history) runtime.update({ time: b.time, value: b }, true);
                 runtime.update({ time: live.time, value: down }, false);
                 const previewDown = snapshot(runtime, definition).join('|');
-                runtime.discardPreview();
                 runtime.update({ time: live.time, value: up }, false);
                 const previewUp = snapshot(runtime, definition).join('|');
 
-                if (previewDown === previewUp) stuck.push(definition.id);
+                if (previewDown !== independent(down) || previewUp !== independent(up))
+                    broken.push(definition.id);
             } catch (error) {
-                stuck.push(`${definition.id}: threw ${error.message}`);
+                broken.push(`${definition.id}: threw ${error.message}`);
             }
         }
 
-        assert.deepEqual(stuck, [],
-            `${stuck.length} indicators answer a committed bar but not the same bar while it forms:\n`
-            + stuck.join('\n'));
+        assert.deepEqual(broken, [],
+            `${broken.length} indicators let one preview affect the next:\n`
+            + broken.join('\n'));
     });
 
     it('discarding a preview puts the line back', () => {

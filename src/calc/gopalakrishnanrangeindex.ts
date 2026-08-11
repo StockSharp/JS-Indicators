@@ -75,7 +75,7 @@ export class GopalakrishnanRangeIndexProcessor extends SequentialIndicatorProces
             value = finite(candidate);
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.high.isFormed && this.low.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

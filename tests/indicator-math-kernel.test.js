@@ -316,7 +316,7 @@ describe('incremental indicator math kernel', () => {
         const ratio = new RollingEfficiencyRatio(3);
         assert.deepEqual([1, 2, 3].map((value) => ratio.push(value)), [null, null, 1]);
         const checkpoint = ratio.checkpoint();
-        assert.equal(ratio.preview(2), 0);
+        assert.equal(ratio.preview(2), 1 / 3);
         assert.equal(ratio.value, 1);
         assert.equal(ratio.push(2), 0);
         assert.equal(ratio.push(null), null);
@@ -328,7 +328,7 @@ describe('incremental indicator math kernel', () => {
 
         const single = new RollingEfficiencyRatio(1);
         assert.equal(single.push(10), 0);
-        assert.equal(single.preview(20), 0);
+        assert.equal(single.preview(20), 1);
     });
 
     it('maintains population/sample variance and standard deviation after eviction', () => {

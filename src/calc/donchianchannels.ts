@@ -18,7 +18,6 @@ import {
     RollingMaximum,
     RollingMinimum,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     CompoundLengthParameters,
     DonchianChannelsCheckpoint,
@@ -27,7 +26,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export class DonchianChannelsProcessor extends SequentialIndicatorProcessor<

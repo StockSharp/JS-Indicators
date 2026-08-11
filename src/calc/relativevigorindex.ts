@@ -19,14 +19,12 @@ import {
     RingBuffer,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     style,
 } from './shared/compound.js';
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface RelativeVigorIndexParameters extends IndicatorParameters {

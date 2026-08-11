@@ -16,7 +16,6 @@ import {
     ExpandingWilderMovingAverage,
     type ExpandingWilderMovingAverageCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     DirectionalMovementCheckpoint,
     DirectionalMovementKernel,
@@ -57,7 +56,7 @@ export class AverageDirectionalIndexProcessor extends SequentialIndicatorProcess
         const visibleDx = input.index >= diFirst ? dx : null;
         const adx = input.index >= diFirst + this.length - 1 ? adxRaw : null;
         return {
-            isFormed: adx !== null,
+            isFormed: this.average.isFormed,
             values: [
                 this.formedOutput('dx', visibleDx, input.index >= diFirst, input.index),
                 this.formedOutput('adx', adx, this.average.isFormed, input.index),

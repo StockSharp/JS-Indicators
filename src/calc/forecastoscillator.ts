@@ -57,7 +57,7 @@ export class ForecastOscillatorProcessor extends SequentialIndicatorProcessor<
                 : null;
         const value = finite(candidate);
         return {
-            isFormed: value !== null,
+            isFormed: this.regression.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

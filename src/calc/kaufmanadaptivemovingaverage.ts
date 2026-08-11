@@ -37,6 +37,25 @@ export interface KaufmanAdaptiveCheckpoint {
     readonly ratio: RollingEfficiencyRatioCheckpoint;
 }
 
+function previewEfficiency(
+    committed: readonly (number | null)[],
+    length: number,
+    close: number | null,
+): number | null {
+    if (close === null || committed.length !== length + 1
+        || committed.some((value) => typeof value !== 'number')) return null;
+
+    // KAMA builds a replace-oldest candidate buffer for a non-final value.
+    // KaufmanEfficiencyRatio itself uses an extended committed path instead,
+    // so these two platform indicators deliberately cannot share preview().
+    const values = [...committed.slice(1), close] as number[];
+    let volatility = 0;
+    for (let index = 1; index < values.length; index += 1)
+        volatility += Math.abs(values[index]! - values[index - 1]!);
+    if (volatility === 0) volatility = 0.00001;
+    return Math.abs(close - values[0]!) / volatility;
+}
+
 export class KaufmanAdaptiveMovingAverageProcessor extends SequentialIndicatorProcessor<
     IndicatorCandle,
     KaufmanAdaptiveCheckpoint
@@ -73,7 +92,9 @@ export class KaufmanAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
             };
         }
         const close = finite(input.value?.close);
-        const efficiency = commit ? this.ratio.push(close) : this.ratio.preview(close);
+        const efficiency = commit
+            ? this.ratio.push(close)
+            : previewEfficiency(this.ratio.checkpoint().values, this.length, close);
         if (input.index < this.length) {
             if (commit && close === null) this.disabled = true;
             return {
@@ -141,6 +162,7 @@ export class KaufmanAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
         this.seeded = state.seeded;
         this.previous = state.previous;
     }
+
 }
 
 export const KaufmanAdaptiveMovingAverageIndicator: IndicatorDefinition<

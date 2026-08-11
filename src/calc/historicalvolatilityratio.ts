@@ -62,7 +62,7 @@ export class HistoricalVolatilityRatioProcessor extends SequentialIndicatorProce
             ? null
             : (long === 0 ? 0 : finite(short / long));
         return {
-            isFormed: value !== null,
+            isFormed: this.short.isFormed && this.long.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

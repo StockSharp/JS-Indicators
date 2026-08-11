@@ -15,7 +15,6 @@ import {
     SequentialIndicatorProcessor,
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     FiniteExponentialAverage,
     FiniteExponentialCheckpoint,
@@ -24,7 +23,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface PercentagePriceOscillatorHistogramParameters extends IndicatorParameters {

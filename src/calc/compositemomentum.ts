@@ -23,7 +23,6 @@ import {
     type PartialRelativeStrengthIndexCheckpoint,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     FiniteExponentialAverage,
     FiniteExponentialCheckpoint,
@@ -32,7 +31,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface CompositeMomentumParameters extends IndicatorParameters {
@@ -130,9 +128,9 @@ export class CompositeMomentumProcessor extends SequentialIndicatorProcessor<
             ? null
             : (commit ? this.average.push(composite) : this.average.preview(composite));
         return {
-            isFormed: composite !== null && sma !== null,
+            isFormed: this.average.isFormed,
             values: [
-                this.formedOutput('composite', composite, composite !== null, input.index),
+                this.formedOutput('composite', composite, commit && composite !== null, input.index),
                 this.formedOutput('sma', sma, this.average.isFormed, input.index),
             ],
         };

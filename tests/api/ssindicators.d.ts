@@ -1554,7 +1554,7 @@ export declare function lengthParameter(id: 'tenkanLength' | 'kijunLength' | 'se
     readonly name: string;
     readonly type: "integer";
     readonly defaultValue: number;
-    readonly min: 1;
+    readonly min: 1 | 2;
     readonly max: number;
     readonly step: 1;
 };

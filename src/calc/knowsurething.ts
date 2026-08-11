@@ -21,14 +21,12 @@ import {
     type RollingWindowCheckpoint,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     style,
 } from './shared/compound.js';
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface KnowSureThingParameters extends IndicatorParameters {
@@ -121,9 +119,9 @@ export class KnowSureThingProcessor extends SequentialIndicatorProcessor<
             ? null
             : (commit ? this.signal.push(kst) : this.signal.preview(kst));
         return {
-            isFormed: signal !== null,
+            isFormed: this.signal.isFormed,
             values: [
-                this.formedOutput('kst', kst, kstFormed, input.index),
+                this.formedOutput('kst', kst, commit && kstFormed, input.index),
                 this.formedOutput('signal', signal, this.signal.isFormed, input.index),
             ],
         };

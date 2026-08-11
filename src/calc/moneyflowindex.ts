@@ -69,16 +69,14 @@ export class MoneyFlowIndexProcessor extends SequentialIndicatorProcessor<
 
         let value: number | null = null;
         if (valid && positiveSum !== null && negativeSum !== null) {
-            const safePositive = Math.max(0, positiveSum);
-            const safeNegative = Math.max(0, negativeSum);
-            if (safeNegative === 0) value = 100;
+            if (negativeSum === 0) value = 100;
             else {
-                const total = safePositive + safeNegative;
-                value = total === 0 ? null : 100 * safePositive / total;
+                const total = positiveSum + negativeSum;
+                value = total === 0 ? null : 100 * positiveSum / total;
             }
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.positive.isFormed && this.negative.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

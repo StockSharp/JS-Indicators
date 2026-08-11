@@ -28,7 +28,7 @@ export class LunarPhaseProcessor extends SequentialIndicatorProcessor<IndicatorC
     ): IndicatorCalculationResult {
         const value = lunarPhaseFromMilliseconds(input.time * 1_000);
         return {
-            isFormed: value !== null,
+            isFormed: _commit,
             values: [this.output('line', value, input.index)],
         };
     }

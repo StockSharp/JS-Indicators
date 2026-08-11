@@ -62,7 +62,7 @@ export class EndpointMovingAverageProcessor extends SequentialIndicatorProcessor
         }
 
         return {
-            isFormed: value !== null,
+            isFormed: this.values.full,
             values: [this.output('line', value, input.index)],
         };
     }

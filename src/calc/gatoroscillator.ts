@@ -110,11 +110,12 @@ export class GatorOscillatorProcessor extends SequentialIndicatorProcessor<
         );
         const upper = jaw === null || lips === null ? null : Math.abs(jaw - lips);
         const lower = lips === null || teeth === null ? null : -Math.abs(lips - teeth);
+        const jawIsFormed = this.jaw.isFormed && this.jawDelay.size > this.jawShift;
         return {
-            isFormed: upper !== null || lower !== null,
+            isFormed: jawIsFormed,
             values: [
-                this.output('upper', upper, input.index),
-                this.output('lower', lower, input.index),
+                this.formedOutput('upper', upper, commit, input.index),
+                this.formedOutput('lower', lower, commit, input.index),
             ],
         };
     }

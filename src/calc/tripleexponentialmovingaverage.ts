@@ -18,7 +18,6 @@ import {
     ExponentialMovingAverage,
     type SeededMovingAverageCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     CompoundLengthParameters,
     FiniteExponentialAverage,
@@ -28,7 +27,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface TripleExponentialMovingAverageCheckpoint {

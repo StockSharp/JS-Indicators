@@ -71,7 +71,7 @@ export class McGinleyDynamicProcessor extends SequentialIndicatorProcessor<
         }
 
         return {
-            isFormed: value !== null,
+            isFormed: this.count >= this.length,
             values: [this.output('line', value, input.index)],
         };
     }

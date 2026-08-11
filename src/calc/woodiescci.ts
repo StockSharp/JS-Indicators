@@ -27,7 +27,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface WoodiesCciParameters extends IndicatorParameters {

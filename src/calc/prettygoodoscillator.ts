@@ -65,7 +65,8 @@ export class PrettyGoodOscillatorProcessor extends SequentialIndicatorProcessor<
             ? null
             : finite((close - average) / range * 100);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed
+                && this.highest.isFormed && this.lowest.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -19,7 +19,6 @@ import {
     PartialSeedExponentialMovingAverage,
     type PartialSeedExponentialMovingAverageCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     style,
 } from './shared/compound.js';
@@ -105,7 +104,8 @@ export class T3MovingAverageProcessor extends SequentialIndicatorProcessor<
             );
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.averages.every((average) => average.isFormed)
+                && this.warmUpPeriod === 0,
             values: [this.output('line', value, input.index)],
         };
     }

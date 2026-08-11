@@ -78,7 +78,7 @@ export class HarmonicOscillatorProcessor extends SequentialIndicatorProcessor<
             : null;
         const value = finite(candidate);
         return {
-            isFormed: value !== null,
+            isFormed: this.values.full && this.invalid === 0,
             values: [this.output('line', value, input.index)],
         };
     }

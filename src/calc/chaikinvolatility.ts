@@ -81,16 +81,15 @@ export class ChaikinVolatilityProcessor extends SequentialIndicatorProcessor<
             this.averageFormed = evaluation.formed;
             this.averagePrevious = evaluation.previous;
         }
-        const past = this.history.size < this.rocLength
-            ? undefined
-            : this.history.at(this.history.size - this.rocLength);
+        if (commit && evaluation.formed && average !== null) this.history.push(average);
+        const formed = this.history.size > this.rocLength;
+        const past = formed ? this.history.front() : undefined;
         const candidate = average !== null && typeof past === 'number' && past !== 0
             ? (average - past) / past * 100
             : null;
         const value = finite(candidate);
-        if (commit) this.history.push(average);
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }

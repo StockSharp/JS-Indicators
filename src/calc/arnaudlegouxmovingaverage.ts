@@ -83,7 +83,7 @@ export class ArnaudLegouxMovingAverageProcessor extends SequentialIndicatorProce
             ? this.average.push(close(input))
             : this.average.preview(close(input));
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

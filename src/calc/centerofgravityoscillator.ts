@@ -65,7 +65,7 @@ export class CenterOfGravityOscillatorProcessor extends SequentialIndicatorProce
             : null;
         const value = finite(candidate);
         return {
-            isFormed: value !== null,
+            isFormed: this.sum.isFormed && this.weighted.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

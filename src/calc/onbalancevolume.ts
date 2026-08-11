@@ -33,7 +33,7 @@ export class OnBalanceVolumeProcessor extends SequentialIndicatorProcessor<
     ): IndicatorCalculationResult {
         const value = this.kernel.process(input.value, commit);
         return {
-            isFormed: value !== null,
+            isFormed: commit,
             values: [this.output('line', value, input.index)],
         };
     }

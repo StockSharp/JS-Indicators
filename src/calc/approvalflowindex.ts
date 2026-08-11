@@ -83,7 +83,7 @@ export class ApprovalFlowIndexProcessor extends SequentialIndicatorProcessor<
             if (!formed) this.previousClose = close;
         }
         return {
-            isFormed: value !== null,
+            isFormed: commit ? formed : this.formed,
             values: [this.output('line', value, input.index)],
         };
     }

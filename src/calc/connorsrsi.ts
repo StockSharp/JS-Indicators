@@ -203,7 +203,7 @@ export class ConnorsRsiProcessor extends SequentialIndicatorProcessor<
             && rsi !== null && updown !== null && rocrsi !== null;
         const crsi = formed ? finite((rsi + updown + rocrsi) / 3) : null;
         return {
-            isFormed: crsi !== null,
+            isFormed: commit && formed,
             values: [
                 this.output('rsi', formed ? rsi : null, input.index),
                 this.output('updown', formed ? updown : null, input.index),

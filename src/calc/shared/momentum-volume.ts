@@ -191,7 +191,7 @@ export abstract class BufferedPriceProcessor extends SequentialIndicatorProcesso
 
     protected past(): number | null | undefined {
         if (this.prices.size < this.length) return undefined;
-        return this.prices.at(this.prices.size - this.length);
+        return this.prices.front();
     }
 
     protected resetState(): void { this.prices.clear(); }

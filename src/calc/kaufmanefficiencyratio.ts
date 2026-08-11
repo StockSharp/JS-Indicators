@@ -45,7 +45,7 @@ export class KaufmanEfficiencyRatioProcessor extends SequentialIndicatorProcesso
         const close = finite(input.value?.close);
         const value = commit ? this.ratio.push(close) : this.ratio.preview(close);
         return {
-            isFormed: value !== null,
+            isFormed: this.ratio.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

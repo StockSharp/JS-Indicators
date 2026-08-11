@@ -18,7 +18,6 @@ import {
     RollingMinimum,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     RecursiveLengthParameters,
     lengthParameter,
@@ -82,7 +81,7 @@ export class FractalDimensionProcessor extends SequentialIndicatorProcessor<
             value = finite(dimension);
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.values.full,
             values: [this.output('line', value, input.index)],
         };
     }

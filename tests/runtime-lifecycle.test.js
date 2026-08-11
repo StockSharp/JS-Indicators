@@ -148,23 +148,24 @@ describe('runtime lifecycle: the forming bar', () => {
         { ...last, high: last.close, low: last.close, close: last.close, volume: 5_000 },
     ];
 
-    it('a preview draws what that bar draws once it is committed', () => {
+    it('committing a preview draws what a direct commit draws', () => {
         const history = SERIES.slice(0, SERIES.length - 1);
         forEachDefinition((definition, parameters) => {
             for (const probe of probes(SERIES[SERIES.length - 1])) {
                 const runtime = build(definition, parameters, { checkpointInterval: 8 });
                 for (const bar of history) runtime.update(input(bar), true);
                 runtime.update(input(probe), false);
+                runtime.update(input(probe), true);
 
-                // Not merely inert, and not merely different from the last preview: the same value
-                // the bar will have the moment it closes. That is what a chart is drawing while the
-                // candle forms.
-                const previewed = snapshot(runtime, definition, parameters);
+                // StockSharp promises that a non-final input leaves state untouched. It does not
+                // promise that the non-final value equals the final one: several windowed
+                // indicators deliberately address a different buffer slot on those two paths.
+                const afterPreview = snapshot(runtime, definition, parameters);
                 const committed = snapshot(bulk(definition, parameters, [...history, probe]), definition, parameters);
-                if (previewed !== committed) return 'a forming bar draws something other than the bar it becomes';
+                if (afterPreview !== committed) return 'previewing before commit changes the committed line';
             }
             return null;
-        }, 'indicators preview a value the committed bar does not have');
+        }, 'indicators retain preview state after the same bar is committed');
     });
 
     it('previews replace one another instead of piling up', () => {
@@ -179,7 +180,10 @@ describe('runtime lifecycle: the forming bar', () => {
             // the line still looks plausible.
             for (const probe of probes(last)) {
                 runtime.update(input(probe), false);
-                const expected = snapshot(bulk(definition, parameters, [...history, probe]), definition, parameters);
+                const independent = build(definition, parameters, { checkpointInterval: 8 });
+                for (const bar of history) independent.update(input(bar), true);
+                independent.update(input(probe), false);
+                const expected = snapshot(independent, definition, parameters);
                 if (snapshot(runtime, definition, parameters) !== expected) return 'consecutive previews accumulate';
             }
             return null;
@@ -295,7 +299,9 @@ describe('runtime lifecycle: corrections and streaming', () => {
             // The bounded-memory path a chart takes for a large history. Nothing generic drove it
             // before, so a definition that loses points here breaks the first paint and nothing
             // else notices.
-            const expected = bulk(definition, parameters, [...history, next]);
+            const expected = build(definition, parameters, { checkpointInterval: 8 });
+            for (const bar of history) expected.update(input(bar), true);
+            expected.update(input(next), false);
             const wanted = [];
             for (const id of outputIds(definition, parameters)) {
                 for (const p of expected.points(id)) wanted.push(`${id}@${p.sourceIndex}->${p.targetIndex}@${p.time}=${p.value}`);

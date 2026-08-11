@@ -32,7 +32,7 @@ export class PassThroughIndicatorProcessor extends SequentialIndicatorProcessor<
     ): IndicatorCalculationResult {
         const value = finite(input.value?.close);
         return {
-            isFormed: value !== null,
+            isFormed: _commit,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -18,7 +18,6 @@ import {
     RollingMaximum,
     RollingMinimum,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     CompoundLengthParameters,
     DonchianChannelsCheckpoint,
@@ -27,7 +26,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export class DetrendedSyntheticPriceProcessor extends SequentialIndicatorProcessor<
@@ -54,7 +52,7 @@ export class DetrendedSyntheticPriceProcessor extends SequentialIndicatorProcess
         const lowest = commit ? this.low.push(low) : this.low.preview(low);
         const value = highest === null || lowest === null ? null : (highest + lowest) / 2;
         return {
-            isFormed: value !== null,
+            isFormed: this.high.isFormed && this.low.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

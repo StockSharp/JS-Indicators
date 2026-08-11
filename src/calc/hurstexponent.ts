@@ -16,7 +16,6 @@ import {
     RingBuffer,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     RecursiveLengthParameters,
     lengthParameter,
@@ -87,7 +86,7 @@ export class HurstExponentProcessor extends SequentialIndicatorProcessor<
             this.invalid = evaluation.invalid;
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.values.full && this.invalid === 0,
             values: [this.output('line', value, input.index)],
         };
     }

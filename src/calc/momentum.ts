@@ -30,13 +30,16 @@ export class MomentumProcessor extends BufferedPriceProcessor {
         commit: boolean,
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
-        const past = this.past();
+        const past = commit && this.prices.full ? this.prices.at(1) : this.past();
+        const formed = commit
+            ? this.prices.size >= this.length
+            : this.prices.size > this.length;
         const value = close !== null && typeof past === 'number'
             ? close - past
             : null;
-        if (commit && close !== null) this.prices.push(close);
+        if (commit) this.prices.push(close);
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }

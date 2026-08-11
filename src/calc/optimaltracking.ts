@@ -50,7 +50,7 @@ export class OptimalTrackingProcessor extends SequentialIndicatorProcessor<
 
     constructor(readonly length: number) {
         super(['line']);
-        integer(length, length, 1, 500, 'length');
+        integer(length, length, 2, 500, 'length');
     }
 
     protected calculate(
@@ -163,7 +163,7 @@ export const OptimalTrackingIndicator: IndicatorDefinition<
     input: CandlestickIndicatorInput,
     parameters: [{
         id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
-        defaultValue: 2, min: 1, max: 500, step: 1,
+        defaultValue: 2, min: 2, max: 500, step: 1,
     }],
     outputs: [{
         id: 'line', name: 'Optimal Tracking',
@@ -179,6 +179,6 @@ export const OptimalTrackingIndicator: IndicatorDefinition<
 
     aliases: ['optimaltracking'],
     processorFactory: (parameters) => new OptimalTrackingProcessor(
-        integer(parameters?.length, 2, 1, 500, 'length'),
+        integer(parameters?.length, 2, 2, 500, 'length'),
     ),
 });

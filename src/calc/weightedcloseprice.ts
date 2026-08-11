@@ -37,7 +37,7 @@ export class WeightedClosePriceProcessor extends SequentialIndicatorProcessor<
             ? null
             : (high + low + 2 * close) / 4;
         return {
-            isFormed: value !== null,
+            isFormed: _commit,
             values: [this.output('line', value, input.index)],
         };
     }

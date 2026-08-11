@@ -64,7 +64,7 @@ export class BalanceVolumeProcessor extends SequentialIndicatorProcessor<
             }
         }
         return {
-            isFormed: value !== null,
+            isFormed: commit,
             values: [this.output('line', value, input.index)],
         };
     }

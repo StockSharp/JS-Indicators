@@ -19,14 +19,12 @@ import {
     LinearWeightedMovingAverage,
     type RollingWindowCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     style,
 } from './shared/compound.js';
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface HullMovingAverageParameters extends IndicatorParameters {
@@ -77,7 +75,7 @@ export class HullMovingAverageProcessor extends SequentialIndicatorProcessor<
         const raw = slow === null || fast === null ? null : 2 * fast - slow;
         const value = commit ? this.result.push(raw) : this.result.preview(raw);
         return {
-            isFormed: value !== null,
+            isFormed: this.result.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

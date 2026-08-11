@@ -19,7 +19,6 @@ import {
     RollingStandardDeviation,
     SimpleMovingAverage,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     BollingerBandsCheckpoint,
     style,

@@ -30,13 +30,16 @@ export class RateOfChangeProcessor extends BufferedPriceProcessor {
         commit: boolean,
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
-        const past = this.past();
+        const past = commit && this.prices.full ? this.prices.at(1) : this.past();
+        const formed = commit
+            ? this.prices.size >= this.length
+            : this.prices.size > this.length;
         const value = close !== null && typeof past === 'number' && past !== 0
             ? (close - past) / past * 100
             : null;
         if (commit) this.prices.push(close);
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -57,5 +60,5 @@ export const RateOfChangeIndicator: IndicatorDefinition<
     measure: IndicatorMeasure.MinusOnePlusOne,
     aliases: ['roc', 'rateofchange'],
     levels: [0],
-    processorFactory: (parameters) => new RateOfChangeProcessor(resolvedLength(parameters, 12)),
+    processorFactory: (parameters) => new RateOfChangeProcessor(resolvedLength(parameters, 5)),
 });

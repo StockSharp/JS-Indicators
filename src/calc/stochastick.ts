@@ -67,7 +67,7 @@ export class StochasticKProcessor extends SequentialIndicatorProcessor<
             value = range === 0 ? 0 : finite(100 * (close - low) / range);
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.high.isFormed && this.low.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

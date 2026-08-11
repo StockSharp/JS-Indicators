@@ -16,7 +16,6 @@ import {
     RingBuffer,
     type RingBufferCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     RecursiveLengthParameters,
     lengthParameter,
@@ -53,7 +52,7 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
 
     constructor(readonly length: number) {
         super(['line']);
-        resolvedLength({ length }, length, 1, 2_000);
+        resolvedLength({ length }, length, 2, 2_000);
         this.values = new RingBuffer(length);
     }
 
@@ -69,7 +68,7 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
             };
         }
 
-        const evaluation = this.evaluate(price);
+        const evaluation = this.evaluate(price, commit);
         if (commit) {
             this.values.push(price);
             this.priceChanges = evaluation.priceChanges;
@@ -77,7 +76,7 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
             this.previousDirection = evaluation.previousDirection;
         }
         return {
-            isFormed: evaluation.value !== null,
+            isFormed: this.values.full,
             values: [this.output('line', evaluation.value, input.index)],
         };
     }
@@ -114,13 +113,13 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
         this.previousDirection = state.previousDirection;
     }
 
-    private evaluate(price: number): MarketMeannessEvaluation {
+    private evaluate(price: number, commit: boolean): MarketMeannessEvaluation {
         let priceChanges = this.priceChanges;
         let directionChanges = this.directionChanges;
         let previousDirection = this.previousDirection;
         const retainedSize = this.values.size - (this.values.full ? 1 : 0);
 
-        if (this.values.full) {
+        if (commit && this.values.full) {
             const oldest = this.values.front() as number;
             const next = this.values.at(1);
             const removedDirection = next === undefined ? 0 : this.sign(next - oldest);
@@ -129,7 +128,10 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
                 directionChanges -= 1;
         }
 
-        if (retainedSize > 0) {
+        const canCompare = commit
+            ? retainedSize > 0
+            : this.values.size > 1 && price !== this.values.back();
+        if (canCompare) {
             const addedDirection = this.sign(price - (this.values.back() as number));
             if (addedDirection !== 0) priceChanges += 1;
             if (addedDirection !== previousDirection && previousDirection !== 0)
@@ -137,7 +139,9 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
             previousDirection = addedDirection;
         }
 
-        const size = Math.min(this.length, this.values.size + 1);
+        const size = commit
+            ? Math.min(this.length, this.values.size + 1)
+            : this.values.size;
         const candidate = size === this.length
             ? (priceChanges > 0 ? 100 * directionChanges / priceChanges : 0)
             : null;
@@ -164,13 +168,13 @@ export const MarketMeannessIndexIndicator: IndicatorDefinition<
     description: 'Percentage of close-price direction changes in a rolling window.',
     category: IndicatorCategory.MarketStrength,
     input: CandlestickIndicatorInput,
-    parameters: [lengthParameter(200, 1, 2_000)],
+    parameters: [lengthParameter(200, 2, 2_000)],
     outputs: [{ id: 'line', name: 'MMI', defaultStyle: lineStyle('#ffca28') }],
     naturalPane: IndicatorPane.Separate,
     measure: IndicatorMeasure.Percent,
     aliases: ['mmi', 'marketmeannessindex'],
     levels: [50],
     processorFactory: (parameters) => new MarketMeannessIndexProcessor(
-        resolvedLength(parameters, 200, 1, 2_000),
+        resolvedLength(parameters, 200, 2, 2_000),
     ),
 });

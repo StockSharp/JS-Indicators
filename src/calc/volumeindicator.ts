@@ -34,7 +34,7 @@ export class VolumeIndicatorProcessor extends SequentialIndicatorProcessor<
         const close = finite(input.value?.close);
         const up = open !== null && close !== null ? close >= open : true;
         return {
-            isFormed: volume !== null,
+            isFormed: _commit,
             values: [this.output('value', volume, input.index, { up })],
         };
     }

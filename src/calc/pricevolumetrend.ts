@@ -63,7 +63,7 @@ export class PriceVolumeTrendProcessor extends SequentialIndicatorProcessor<
             if (value !== null) this.current = value;
         }
         return {
-            isFormed: value !== null,
+            isFormed: commit,
             values: [this.output('line', value, input.index)],
         };
     }

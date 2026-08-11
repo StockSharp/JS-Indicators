@@ -66,7 +66,7 @@ export class IntradayMomentumIndexProcessor extends SequentialIndicatorProcessor
             value = total === 0 ? 0 : finite(100 * upSum / total);
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.up.isFormed && this.down.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

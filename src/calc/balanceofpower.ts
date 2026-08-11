@@ -18,7 +18,6 @@ import {
 } from './shared/range.js';
 import {
     finite,
-    number,
 } from './shared/guards.js';
 
 export class BalanceOfPowerProcessor extends SequentialIndicatorProcessor<
@@ -43,9 +42,10 @@ export class BalanceOfPowerProcessor extends SequentialIndicatorProcessor<
                 if (Number.isFinite(raw)) value = Math.max(-1, Math.min(1, raw));
             }
         }
+        const formsNow = _commit && value !== null;
         return {
-            isFormed: value !== null,
-            values: [this.output('line', value, input.index)],
+            isFormed: formsNow,
+            values: [this.output('line', _commit ? value : null, input.index)],
         };
     }
 

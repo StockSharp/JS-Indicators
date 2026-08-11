@@ -19,7 +19,6 @@ import {
     SimpleMovingAverage,
     type RollingWindowCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     style,
 } from './shared/compound.js';

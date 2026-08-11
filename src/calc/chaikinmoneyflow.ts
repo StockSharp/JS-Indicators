@@ -102,7 +102,7 @@ export class ChaikinMoneyFlowProcessor extends SequentialIndicatorProcessor<
             : null;
         const value = finite(candidateValue);
         return {
-            isFormed: value !== null,
+            isFormed: this.moneyFlowVolumes.full && this.invalid === 0,
             values: [this.output('line', value, input.index)],
         };
     }

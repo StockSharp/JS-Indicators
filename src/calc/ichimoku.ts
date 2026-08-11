@@ -37,7 +37,8 @@ export function parameter(
     fallback: number,
     maximum: number,
 ): number {
-    return period(values?.[name] ?? values?.[alias], fallback, 1, maximum, name);
+    const minimum = name === 'tenkanLength' || name === 'kijunLength' ? 2 : 1;
+    return period(values?.[name] ?? values?.[alias], fallback, minimum, maximum, name);
 }
 
 export function lengthParameter(
@@ -46,12 +47,13 @@ export function lengthParameter(
     defaultValue: number,
     maximum: number,
 ) {
+    const minimum = id === 'tenkanLength' || id === 'kijunLength' ? 2 : 1;
     return {
         id,
         name,
         type: IndicatorParameterType.Integer,
         defaultValue,
-        min: 1,
+        min: minimum,
         max: maximum,
         step: 1,
     } as const;
@@ -91,8 +93,8 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         readonly chinkouLength: number,
     ) {
         super(['tenkan', 'kijun', 'senkouA', 'senkouB', 'chikou']);
-        period(tenkanLength, tenkanLength, 1, 200, 'tenkanLength');
-        period(kijunLength, kijunLength, 1, 400, 'kijunLength');
+        period(tenkanLength, tenkanLength, 2, 200, 'tenkanLength');
+        period(kijunLength, kijunLength, 2, 400, 'kijunLength');
         period(senkouBLength, senkouBLength, 1, 400, 'senkouBLength');
         period(chinkouLength, chinkouLength, 1, 400, 'chinkouLength');
         this.tenkanHigh = new RollingMaximum(tenkanLength);

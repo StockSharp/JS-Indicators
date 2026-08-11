@@ -48,7 +48,7 @@ export class LinearRegressionProcessor extends SequentialIndicatorProcessor<
             ? this.regression.push(close(input))
             : this.regression.preview(close(input));
         return {
-            isFormed: value !== null,
+            isFormed: this.regression.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

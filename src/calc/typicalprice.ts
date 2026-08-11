@@ -27,7 +27,7 @@ export class TypicalPriceProcessor extends SequentialIndicatorProcessor<Indicato
     ): IndicatorCalculationResult {
         const value = typicalPrice(input.value);
         return {
-            isFormed: value !== null,
+            isFormed: _commit,
             values: [this.output('line', value, input.index)],
         };
     }

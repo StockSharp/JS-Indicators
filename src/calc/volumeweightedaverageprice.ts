@@ -53,7 +53,7 @@ export class VolumeWeightedAveragePriceProcessor extends SequentialIndicatorProc
         }
         const value = volume > 0 ? priceVolume / volume : null;
         return {
-            isFormed: value !== null,
+            isFormed: commit,
             values: [this.output('line', value, input.index)],
         };
     }

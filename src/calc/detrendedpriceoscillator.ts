@@ -56,19 +56,8 @@ export class DetrendedPriceOscillatorProcessor extends SequentialIndicatorProces
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const average = commit ? this.average.push(close) : this.average.preview(close);
-        const averageState = this.average.checkpoint();
-        const averageWillForm = commit
-            ? this.average.isFormed
-            : close !== null
-                && averageState.values.length + (averageState.values.length < this.length ? 1 : 0)
-                    >= this.length
-                && averageState.values.every((value) => value !== null);
-        if (commit && averageWillForm && average !== null) this.history.push(average);
+        if (commit && this.average.isFormed && average !== null) this.history.push(average);
         const history = [...this.history.checkpoint().values];
-        if (!commit && averageWillForm && average !== null) {
-            if (history.length >= this.length) history.shift();
-            history.push(average);
-        }
         const formed = history.length >= this.length;
         const referenceIndex = Math.max(0, history.length - 1 - this.lookBack);
         const reference = history[referenceIndex];

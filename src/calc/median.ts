@@ -43,7 +43,7 @@ export class MedianProcessor extends SequentialIndicatorProcessor<
             ? this.median.push(close(input))
             : this.median.preview(close(input));
         return {
-            isFormed: this.median.isFormed || value !== null,
+            isFormed: this.median.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

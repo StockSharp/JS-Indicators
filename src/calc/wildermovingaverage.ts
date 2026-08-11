@@ -9,9 +9,6 @@ import {
 } from '../indicator-definition.js';
 import { registerIndicator } from '../indicator-registry.js';
 import {
-    WilderMovingAverage,
-} from '../math/index.js';
-import {
     LENGTH_STYLE,
     LengthIndicatorParameters,
     SmoothedMovingAverageProcessor,

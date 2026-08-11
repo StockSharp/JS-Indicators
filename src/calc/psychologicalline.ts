@@ -59,16 +59,18 @@ export class PsychologicalLineProcessor extends SequentialIndicatorProcessor<
 
         let upCount = this.upCount;
         const latest = this.closes.back();
-        if (this.closes.full && this.closes.front()! < latest!) upCount -= 1;
+        if (commit && this.closes.full && this.closes.front()! < latest!) upCount -= 1;
         if (latest !== undefined && price > latest) upCount += 1;
-        const formed = this.closes.full || this.closes.size + 1 === this.length;
+        const formed = commit
+            ? this.closes.full || this.closes.size + 1 === this.length
+            : this.closes.full;
         if (commit) {
             this.closes.push(price);
             this.upCount = upCount;
         }
         const value = formed ? upCount / this.length : null;
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }

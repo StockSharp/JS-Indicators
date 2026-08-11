@@ -12,7 +12,6 @@ import {
     SequentialIndicatorProcessor,
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     DirectionalMovementCheckpoint,
     DirectionalMovementKernel,

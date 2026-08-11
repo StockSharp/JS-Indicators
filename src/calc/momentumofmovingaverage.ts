@@ -73,30 +73,16 @@ export class MomentumOfMovingAverageProcessor extends SequentialIndicatorProcess
                 if (first !== 0) value = finite((average - first) / first * 100);
             }
         } else {
-            const wasFull = this.values.full;
-            const nextSize = Math.min(this.length, this.values.size + 1);
-            const outgoing = wasFull ? (this.values.front() as number) : 0;
-            const nextSum = this.sum - outgoing + price;
-            if (nextSize === this.length) {
-                const average = nextSum / this.length;
-                let first: number;
-                if (this.length === 1) {
-                    first = average;
-                } else if (wasFull) {
-                    first = this.length === 2
-                        ? price
-                        : (this.values.at(2) as number);
-                } else {
-                    first = this.length === 2
-                        ? price
-                        : (this.values.at(1) as number);
-                }
+            if (this.values.full && this.values.size >= 2) {
+                const average = (this.sum - (this.values.front() as number) + price)
+                    / this.length;
+                const first = this.values.at(1) as number;
                 if (first !== 0) value = finite((average - first) / first * 100);
             }
         }
 
         return {
-            isFormed: value !== null,
+            isFormed: this.values.full,
             values: [this.output('line', value, input.index)],
         };
     }

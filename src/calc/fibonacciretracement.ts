@@ -25,7 +25,6 @@ import {
 import {
     finite,
     length,
-    number,
 } from './shared/guards.js';
 
 export interface FibonacciRetracementCheckpoint {

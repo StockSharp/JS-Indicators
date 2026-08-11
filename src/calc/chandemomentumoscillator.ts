@@ -81,7 +81,7 @@ export class ChandeMomentumOscillatorProcessor extends SequentialIndicatorProces
             value = total === 0 ? 0 : finite(100 * (upSum - downSum) / total);
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.up.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

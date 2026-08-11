@@ -20,7 +20,6 @@ import {
     RollingMinimum,
     type RollingWindowCheckpoint,
 } from '../math/index.js';
-import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
 import {
     FiniteExponentialAverage,
     FiniteExponentialCheckpoint,
@@ -31,7 +30,6 @@ import {
 import {
     finite,
     integer,
-    number,
 } from './shared/guards.js';
 
 export interface SchaffTrendCycleParameters extends IndicatorParameters {
@@ -100,12 +98,9 @@ export class SchaffTrendCycleProcessor extends SequentialIndicatorProcessor<
             }
             closeHigh = this.closeHigh.partialValue;
             closeLow = this.closeLow.partialValue;
-        } else if (close === null) {
+        } else {
             closeHigh = this.closeHigh.partialValue;
             closeLow = this.closeLow.partialValue;
-        } else {
-            closeHigh = this.closeHigh.previewPartial(close);
-            closeLow = this.closeLow.previewPartial(close);
         }
 
         const macd = commit ? this.macd.push(close) : this.macd.preview(close);
@@ -144,10 +139,12 @@ export class SchaffTrendCycleProcessor extends SequentialIndicatorProcessor<
                 stochasticFormed = this.stochasticHigh.isFormed
                     && this.stochasticLow.isFormed;
             } else {
-                stochasticHigh = this.stochasticHigh.previewPartial(raw);
-                stochasticLow = this.stochasticLow.previewPartial(raw);
-                stochasticFormed = this.stochasticHigh.preview(raw) !== null
-                    && this.stochasticLow.preview(raw) !== null;
+                const currentHigh = this.stochasticHigh.partialValue;
+                const currentLow = this.stochasticLow.partialValue;
+                stochasticHigh = currentHigh === null ? raw : Math.max(currentHigh, raw);
+                stochasticLow = currentLow === null ? raw : Math.min(currentLow, raw);
+                stochasticFormed = this.stochasticHigh.isFormed
+                    && this.stochasticLow.isFormed;
             }
             if (stochasticHigh === null || stochasticLow === null) {
                 return {

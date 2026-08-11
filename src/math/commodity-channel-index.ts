@@ -18,13 +18,13 @@ export class CommodityChannelIndexKernel {
 
     push(value: NumericValue): number | null {
         const incoming = numeric(value);
-        const result = this.evaluate(incoming);
+        const result = this.evaluate(incoming, false);
         this.values.push(incoming);
         return result;
     }
 
     preview(value: NumericValue): number | null {
-        return this.evaluate(numeric(value));
+        return this.evaluate(numeric(value), true);
     }
 
     reset(): void { this.values.clear(); }
@@ -40,7 +40,7 @@ export class CommodityChannelIndexKernel {
         this.values.restore(checkpoint);
     }
 
-    private evaluate(incoming: number | null): number | null {
+    private evaluate(incoming: number | null, preview: boolean): number | null {
         const window = this.values.toArray();
         if (window.length === this.windowLength) window.shift();
         window.push(incoming);
@@ -63,8 +63,17 @@ export class CommodityChannelIndexKernel {
         let deviation = 0;
         for (const value of window) deviation += Math.abs(value! - average);
         deviation /= this.windowLength;
+        let referenceAverage = average;
+        if (preview && this.values.full) {
+            let committedSum = 0;
+            for (const value of this.values.toArray()) {
+                if (value === null) return null;
+                committedSum += value;
+            }
+            referenceAverage = committedSum / this.windowLength;
+        }
         return deviation === 0
             ? null
-            : (incoming! - average) / (0.015 * deviation);
+            : (incoming! - referenceAverage) / (0.015 * deviation);
     }
 }

@@ -53,6 +53,8 @@ export class MassIndexProcessor extends SequentialIndicatorProcessor<
         super(['line']);
         period(length, length, 'length');
         period(emaLength, emaLength, 'emaLength');
+        if (emaLength < 2)
+            throw new RangeError('sschart: emaLength must be an integer from 2 to 500');
         this.single = new PartialSeedExponentialMovingAverage(emaLength);
         this.double = new PartialSeedExponentialMovingAverage(emaLength);
         this.ratios = new RingBuffer(length);
@@ -107,7 +109,7 @@ export class MassIndexProcessor extends SequentialIndicatorProcessor<
         }
 
         return {
-            isFormed: value !== null,
+            isFormed: this.ratios.full,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -164,7 +166,7 @@ export const MassIndexIndicator: IndicatorDefinition<
         },
         {
             id: 'emaLength', name: 'EMA Length', type: IndicatorParameterType.Integer,
-            defaultValue: 9, min: 1, max: 500, step: 1,
+            defaultValue: 9, min: 2, max: 500, step: 1,
         },
     ],
     outputs: [{

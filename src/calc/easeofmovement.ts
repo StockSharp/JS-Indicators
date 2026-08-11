@@ -64,7 +64,11 @@ export class EaseOfMovementProcessor extends SequentialIndicatorProcessor<
                 - (this.previousHigh + this.previousLow) / 2;
             const emv = finite(midpointMove * range / volume);
             if (emv !== null) {
-                const sum = commit ? this.values.push(emv) : this.values.preview(emv);
+                const sum = commit
+                    ? this.values.push(emv)
+                    : this.values.isFormed && this.values.partialValue !== null
+                        ? this.values.partialValue + emv
+                        : null;
                 average = sum === null ? null : finite(sum / this.length);
             }
         }
@@ -74,7 +78,7 @@ export class EaseOfMovementProcessor extends SequentialIndicatorProcessor<
             this.previousLow = low;
         }
         return {
-            isFormed: average !== null,
+            isFormed: this.values.isFormed,
             values: [this.output('line', average, input.index)],
         };
     }

@@ -12,7 +12,6 @@ import {
     ExpandingWilderMovingAverage,
     type ExpandingWilderMovingAverageCheckpoint,
 } from '../../math/index.js';
-import { CommodityChannelIndexKernel } from '../../math/commodity-channel-index.js';
 import {
     finite,
 } from './guards.js';

@@ -52,7 +52,7 @@ export class RelativeMomentumIndexProcessor extends SequentialIndicatorProcessor
         super(['line']);
         resolvedPeriod(length, length, 'length');
         resolvedPeriod(momentumPeriod, momentumPeriod, 'momentumPeriod');
-        this.prices = new RingBuffer(momentumPeriod + 1);
+        this.prices = new RingBuffer(length + momentumPeriod);
         this.up = new SimpleMovingAverage(length);
         this.down = new SimpleMovingAverage(length);
     }
@@ -62,9 +62,10 @@ export class RelativeMomentumIndexProcessor extends SequentialIndicatorProcessor
         commit: boolean,
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
-        const past = this.prices.size < this.momentumPeriod
+        if (commit) this.prices.push(close);
+        const past = this.prices.size <= this.momentumPeriod
             ? null
-            : (this.prices.at(this.prices.size - this.momentumPeriod) ?? null);
+            : (this.prices.at(this.prices.size - 1 - this.momentumPeriod) ?? null);
         const momentum = close === null || past === null ? null : close - past;
         const averageUp = commit
             ? this.up.push(momentum === null ? null : Math.max(momentum, 0))
@@ -72,8 +73,6 @@ export class RelativeMomentumIndexProcessor extends SequentialIndicatorProcessor
         const averageDown = commit
             ? this.down.push(momentum === null ? null : Math.max(-momentum, 0))
             : this.down.preview(momentum === null ? null : Math.max(-momentum, 0));
-        if (commit) this.prices.push(close);
-
         const denominator = averageUp === null || averageDown === null
             ? 0
             : averageUp + averageDown;
@@ -81,7 +80,7 @@ export class RelativeMomentumIndexProcessor extends SequentialIndicatorProcessor
             ? null
             : 100 * averageUp / denominator;
         return {
-            isFormed: value !== null,
+            isFormed: this.up.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -109,7 +108,7 @@ export class RelativeMomentumIndexProcessor extends SequentialIndicatorProcessor
             && checkpoint.values.every((value) => value === null || finite(value) !== null)
         );
         if (state === null || typeof state !== 'object'
-            || !valid(state.prices, this.momentumPeriod + 1)
+            || !valid(state.prices, this.length + this.momentumPeriod)
             || !valid(state.up, this.length) || !valid(state.down, this.length)) {
             throw new TypeError('sschart: invalid Relative Momentum Index checkpoint');
         }
