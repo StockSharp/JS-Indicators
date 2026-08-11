@@ -6,8 +6,8 @@
 //
 // Hard assertions:
 //   * every catalog param key is actually read by that indicator's calc fn (pure TS — always runs).
-//   * every client indicator kind is a real StockSharp indicator (runs when the .NET dump is
-//     available; skipped otherwise so the node-only suite still passes without the SDK).
+//   * every client indicator kind is a real StockSharp indicator (the .NET dump is required;
+//     an unavailable platform oracle is a hard failure).
 //   * every parameter default matches the platform's, or is a named deliberate divergence.
 // Informational (logged, not asserted — the client deliberately differs): pane / param-count deltas.
 

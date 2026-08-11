@@ -6,7 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- The exact StockSharp indicators the terminal uses (source, not the lagging NuGet). If the
-         sibling StockSharp checkout is absent the build fails and the parity test skips. -->
+         sibling StockSharp checkout is absent the parity gate fails. -->
     <ProjectReference Include="..\..\..\StockSharp (GitHub)\Algo.Indicators\Algo.Indicators.csproj" />
   </ItemGroup>
 </Project>

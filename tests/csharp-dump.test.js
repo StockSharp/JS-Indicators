@@ -12,31 +12,22 @@ describe('C# parity availability', () => {
         assert.deepEqual(skipped, []);
     });
 
-    it('names and skips only the three supported unavailable environments', () => {
+    it('fails loudly for every unavailable environment', () => {
         const reasons = [
             'stocksharp-checkout-absent',
             'dotnet-missing',
             'dotnet-sdk-missing',
+            'dumper-crashed',
         ];
 
         for (const reason of reasons) {
-            const skipped = [];
-            const result = requireDump({ skip: (message) => skipped.push(message) }, {
-                available: false,
-                reason,
-            });
-
-            assert.equal(result, false);
-            assert.deepEqual(skipped, [`StockSharp .NET dump unavailable: ${reason}`]);
+            assert.throws(
+                () => requireDump({ skip: () => assert.fail('must not skip') }, {
+                    available: false,
+                    reason,
+                }),
+                new RegExp(`parity cannot run: ${reason}`),
+            );
         }
-    });
-
-    it('fails loudly for every unsupported unavailable reason', () => {
-        assert.throws(
-            () => requireDump({ skip: () => assert.fail('must not skip') }, {
-                available: false,
-                reason: 'dumper-crashed',
-            }),
-            /unsupported reason: dumper-crashed/);
     });
 });

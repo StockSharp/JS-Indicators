@@ -79,10 +79,10 @@ by name.
 
 ## Correctness
 
-The reference is StockSharp's C# `Algo.Indicators`, not this package's own output. With the
-.NET SDK and a sibling `StockSharp (GitHub)` checkout present, `npm test` builds a dumper
-against the real platform and compares catalogue *and* values against it. Without them
-those tests skip, and say which of the two is missing — they never pass quietly.
+The reference is StockSharp's C# `Algo.Indicators`, not this package's own output. `npm test`
+requires the .NET SDK and a sibling `StockSharp (GitHub)` checkout, builds a dumper against
+the real platform, and compares catalogue *and* values against it. If the oracle is unavailable,
+the command fails: an unverified parity run must never publish as green.
 
 See [`AGENTS.md`](AGENTS.md) for the layout, the commands and the rules that keep the
 parity suite honest.

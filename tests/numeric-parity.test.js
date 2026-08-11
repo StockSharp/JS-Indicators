@@ -8,9 +8,8 @@
 // (single-output indicators only for now; multi-output lines come later and are skipped here).
 //
 // tools/parity-dump.mjs runs that dumper once before node:test starts and caches the output;
-// this file only reads the cache. The suite skips only for one of the three reasons that script
-// detects on purpose (StockSharp checkout absent, dotnet missing, no SDK), and the reason is
-// named in the skip message. A build that fails for any other cause fails `npm test`.
+// this file only reads the cache. An unavailable StockSharp checkout or .NET SDK is a hard
+// failure: without the platform oracle this suite has not established numeric parity.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');

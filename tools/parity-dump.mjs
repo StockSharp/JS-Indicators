@@ -12,10 +12,9 @@
 // Building here, once, before any parallelism starts, removes the race structurally rather
 // than by convention: a third parity test file cannot reintroduce it.
 //
-// It also splits "cannot run here at all" from "tried and failed". The three unavailable
-// reasons below are detected deliberately and named in the skip message; anything else — a
-// broken build, a dumper that crashes, output that is not JSON — exits non-zero and fails
-// `npm test` with the captured output instead of being swallowed.
+// It also splits "cannot run here at all" from "tried and failed", while treating both as hard
+// failures. A green run must mean that JS was actually compared with the C# platform, never that
+// the oracle happened to be missing.
 
 import { execFileSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -36,8 +35,8 @@ function writeStatus(status) {
 
 function unavailable(reason, detail) {
     writeStatus({ available: false, reason, detail: detail ?? null });
-    console.log(`[parity-dump] unavailable: ${reason}${detail ? ` (${detail})` : ''} — parity tests will skip`);
-    process.exit(0);
+    console.error(`[parity-dump] unavailable: ${reason}${detail ? ` (${detail})` : ''} — parity is required`);
+    process.exit(1);
 }
 
 function fail(what, log) {
@@ -56,8 +55,8 @@ function stockSharpRef() {
     return isAbsolute(raw) ? raw : resolve(projDir, raw);
 }
 
-// This is the CI path and it must not depend on dotnet being present at all: GitHub checks out
-// only this repo, so the sibling StockSharp source is simply not there.
+// CI must provide the same sibling checkout as development. If it does not, fail here instead
+// of letting a release look verified without ever comparing it with StockSharp.
 const ssRef = stockSharpRef();
 if (!existsSync(ssRef)) unavailable('stocksharp-checkout-absent', ssRef);
 

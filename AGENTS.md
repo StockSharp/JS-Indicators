@@ -31,10 +31,9 @@ see "Consumers" below.
 | `npm run api:check` / `api:update` | verify / regenerate the public-API snapshot |
 | `npm run pack:check` | `npm pack --dry-run` — what would actually ship |
 
-`npm test` needs no browser. It does not need the .NET SDK either, but with the SDK **and** a
-sibling `StockSharp (GitHub)` checkout present it additionally runs the parity tests that
-compare this port against the real platform; without them `tools/parity-dump.mjs` records why
-and those tests skip with that reason named.
+`npm test` needs no browser. It **does** require the .NET SDK and a sibling
+`StockSharp (GitHub)` checkout because parity against the real platform is release-gating.
+If either is unavailable, `tools/parity-dump.mjs` names the reason and the command fails.
 
 ## Layout
 
@@ -88,11 +87,9 @@ Charts, and remember to unlink before trusting a green Charts run.
   the JSON in `.parity-cache/`; the parity files only read that cache. Never invoke `dotnet`
   from inside a test file: node:test runs files in parallel workers, and two concurrent builds
   of the same project fail with `CS2012` on the shared obj output.
-- **A parity skip must name its reason.** Exactly three conditions skip:
-  `stocksharp-checkout-absent`, `dotnet-missing`, `dotnet-sdk-missing`. Anything else — a
-  failing build, a crashing dumper, non-JSON output, an unparsable cache — is a hard failure.
-  Do not add a `catch` that turns a new failure mode into a skip; the suite spent a long time
-  reporting itself green that way.
+- **Parity never skips.** A missing StockSharp checkout, missing .NET SDK, failing build,
+  crashing dumper, non-JSON output or unparsable cache is a hard failure. Do not add a `catch`
+  or `t.skip` on this path; the suite spent a long time reporting itself green that way.
 - **One operating point proves almost nothing.** `numeric-parity` compares every indicator
   against the platform bar-for-bar, and it passed for a long time while sixteen indicators were
   wrong -- because it runs one smooth series at default parameters. `parity-scan.test.js` adds
