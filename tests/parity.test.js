@@ -83,14 +83,14 @@ describe('indicator catalog parity with StockSharp', () => {
     });
 
     it('every client indicator kind exists in the StockSharp catalog', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         const missing = catalog.filter((e) => !csByKind.has(e.serverKind.toLowerCase()));
         assert.deepEqual(missing.map((e) => e.id), [],
             'client kinds absent from StockSharp: ' + missing.map((e) => e.id).join(', '));
     });
 
     it('every indicator sits where StockSharp puts it, with the parameters it exposes', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         const paneDiffs = [];
         const countDiffs = [];
         const nameDiffs = [];
@@ -197,7 +197,7 @@ describe('indicator catalog parity with StockSharp', () => {
     // platform is invisible to every other check here. A user adding the indicator on the site and
     // on the terminal gets two different lines, and nothing says so.
     it('every indicator measures the same thing StockSharp says it measures', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         // The measure is what a chart scales a pane by -- a percentage runs 0..100, a correlation
         // -1..+1, a volume neither. Getting it wrong puts an indicator on a scale that hides it,
         // and nothing in a value comparison notices, because the numbers are right either way.
@@ -219,7 +219,7 @@ describe('indicator catalog parity with StockSharp', () => {
     });
 
     it('every indicator needs as many bars to form as StockSharp says it needs', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         // The platform states its warm-up: NumValuesToInitialize, which several indicators
         // override -- an Alligator defers to its jaw, a shifted line adds its shift. Ours states
         // nothing, so this asks the observable form of the same thing: the bar its first value
@@ -254,7 +254,7 @@ describe('indicator catalog parity with StockSharp', () => {
     });
 
     it('every parameter default matches StockSharp', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         const drifted = [];
         const detail = [];
         for (const e of catalog) {

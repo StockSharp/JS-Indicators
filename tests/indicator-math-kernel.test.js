@@ -417,13 +417,13 @@ describe('incremental indicator math kernel', () => {
         closeTo(atr.push(bars[3]), 34 / 9);
     });
 
-    it('matches StockSharp, which is the only oracle a kernel has', () => {
+    it('matches StockSharp, which is the only oracle a kernel has', (t) => {
         // This used to compare the kernel against the batch calc -- a second implementation of the
         // same arithmetic, written separately, which is what made it an opinion worth having. The
         // batch layer is gone, and comparing the kernel against the indicator built on it would
         // compare SimpleMovingAverage to a wrapper around SimpleMovingAverage: true whatever the
         // formula says. So the oracle is the platform, the same one every other tier uses.
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         const dump = readDump('values.json');
         const bars = dump.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
 

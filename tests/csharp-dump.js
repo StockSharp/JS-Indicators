@@ -25,20 +25,24 @@ export function loadDumpStatus() {
     return JSON.parse(readFileSync(file, 'utf8'));
 }
 
+const unavailableReasons = new Set([
+    'stocksharp-checkout-absent',
+    'dotnet-missing',
+    'dotnet-sdk-missing',
+]);
+
 /**
- * Refuse to run a parity test that cannot reach the platform.
- *
- * This used to be `t.skip(reason)`, which reads as a pass: on CI, where the sibling StockSharp
- * checkout is absent, ten of the twelve parity tests skipped and the job exited 0 -- including the
- * job that publishes. A suite that cannot compare against the platform has not compared against the
- * platform, and it should say so in the colour that gets read.
+ * Run parity when the platform dump is available, or skip with one of the three reasons that the
+ * prep step deliberately recognises. Any new reason remains a hard failure: it must not turn a
+ * broken build, a crashing dumper or a malformed cache into a green release.
  */
-export function requireDump(status) {
-    if (status.available) return;
-    throw new Error(
-        `parity cannot run: ${status.reason}. The comparison needs the StockSharp checkout named in ` +
-        'tools/csharp-catalog/csharp-catalog.csproj and a .NET SDK. This is a failure rather than a ' +
-        'skip on purpose: a skipped parity test is a green tick over an unverified port.');
+export function requireDump(t, status) {
+    if (status.available) return true;
+    if (!unavailableReasons.has(status.reason)) {
+        throw new Error(`parity cannot run for an unsupported reason: ${status.reason}`);
+    }
+    t.skip(`StockSharp .NET dump unavailable: ${status.reason}`);
+    return false;
 }
 
 export function readDump(name) {

@@ -147,7 +147,7 @@ const available = status.available;
 
 describe('parity scan: parameter matrix', () => {
     it('every indicator matches StockSharp with each of its parameters moved', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
 
         const dump = readDump('values.json');
         const candles = dump.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
@@ -220,7 +220,7 @@ describe('parity scan: parameter matrix', () => {
 
 describe('parity scan: candle shapes', () => {
     it('every indicator matches StockSharp on constant, gapped, spiked and degenerate series', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
 
         const stress = readDump('stress.json');
         const diverged = [];

@@ -79,7 +79,7 @@ function close(js, cs) {
 
 describe('numeric parity: JS calc vs StockSharp C#', () => {
     it('C# dumper provides a numeric --values dump (input + per-bar values)', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         assert.ok(dump.data && Array.isArray(dump.data.input) && dump.data.input.length > 30,
             'expected { input: [...] } with a non-trivial series from --values');
         assert.ok(Array.isArray(dump.data.indicators) && dump.data.indicators.some((e) => Array.isArray(e.values)),
@@ -87,7 +87,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     });
 
     it('single-output core indicators match StockSharp bar-for-bar', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         assert.ok(dump.data && Array.isArray(dump.data.input), 'no numeric dump (--values not implemented)');
 
         const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
@@ -127,7 +127,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     // a non-final value that never commits. For each perturbed forming bar the JS port — re-running its
     // calc over series + that bar — must land on the same preview the C# indicator yields non-finally.
     it('single-output core indicators match StockSharp on a changing (non-final) last candle', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         assert.ok(dump.data && Array.isArray(dump.data.probes) && dump.data.probes.length > 0,
             'expected { probes: [...] } from --values for the changing-candle check');
 
@@ -169,7 +169,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     // multi-output ones) through its JS calc fn over the final series and assert none diverge.
     // This locks in the whole port against StockSharp; non-scalar indicators are excluded explicitly.
     it('every scalar indicator matches StockSharp bar-for-bar', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
         const matched = [];
         const diverged = [];
@@ -231,7 +231,7 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
     // line reproduces it bar-for-bar, so field-name differences don't matter; every C# line must
     // be reproduced by some JS line.
     it('every complex indicator line matches StockSharp bar-for-bar', (t) => {
-        requireDump(status);
+        if (!requireDump(t, status)) return;
         const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
 
         const asLine = (arr) => arr.map((p) => (p && typeof p === 'object' && !Array.isArray(p)) ? p.value : p);
