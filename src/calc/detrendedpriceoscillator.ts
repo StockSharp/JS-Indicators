@@ -56,18 +56,28 @@ export class DetrendedPriceOscillatorProcessor extends SequentialIndicatorProces
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const average = commit ? this.average.push(close) : this.average.preview(close);
-        const target = input.index - this.lookBack;
-        const reference = this.history.size < this.lookBack
-            ? undefined
-            : this.history.at(this.history.size - this.lookBack);
-        const candidate = input.index >= 2 * this.length - 2
-            && target >= 0 && close !== null && typeof reference === 'number'
+        const averageState = this.average.checkpoint();
+        const averageWillForm = commit
+            ? this.average.isFormed
+            : close !== null
+                && averageState.values.length + (averageState.values.length < this.length ? 1 : 0)
+                    >= this.length
+                && averageState.values.every((value) => value !== null);
+        if (commit && averageWillForm && average !== null) this.history.push(average);
+        const history = [...this.history.checkpoint().values];
+        if (!commit && averageWillForm && average !== null) {
+            if (history.length >= this.length) history.shift();
+            history.push(average);
+        }
+        const formed = history.length >= this.length;
+        const referenceIndex = Math.max(0, history.length - 1 - this.lookBack);
+        const reference = history[referenceIndex];
+        const candidate = formed && close !== null && typeof reference === 'number'
             ? close - reference
             : null;
         const value = finite(candidate);
-        if (commit && input.index >= this.length - 1) this.history.push(average);
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -59,10 +59,10 @@ export class MacdSignalProcessor extends SequentialIndicatorProcessor<
             ? this.kernel.push(finite(input.value?.close))
             : this.kernel.preview(finite(input.value?.close));
         return {
-            isFormed: value.signal !== null,
+            isFormed: this.kernel.signalIsFormed,
             values: [
-                this.output('macd', value.macd, input.index),
-                this.output('signal', value.signal, input.index),
+                this.formedOutput('macd', value.macd, this.kernel.macdIsFormed, input.index),
+                this.formedOutput('signal', value.signal, this.kernel.signalIsFormed, input.index),
             ],
         };
     }
@@ -85,10 +85,12 @@ export const MacdSignalIndicator: IndicatorDefinition<
         {
             id: 'longMaLength', name: 'Long Length', type: IndicatorParameterType.Integer,
             defaultValue: 26, min: 1, max: 500, step: 1,
+            aliases: ['macdLongMaLength'],
         },
         {
             id: 'shortMaLength', name: 'Short Length', type: IndicatorParameterType.Integer,
             defaultValue: 12, min: 1, max: 500, step: 1,
+            aliases: ['macdShortMaLength'],
         },
         {
             id: 'signalMaLength', name: 'Signal Length', type: IndicatorParameterType.Integer,

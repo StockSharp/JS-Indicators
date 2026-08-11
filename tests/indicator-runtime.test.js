@@ -323,6 +323,13 @@ describe('IndicatorRuntime', () => {
         assert.equal(resolved.point.time, 3);
         assert.equal(resolved.point.sourceIndex, 0);
         assert.equal(patch.operations.some((item) => item.point?.time === null), false);
+
+        const discarded = future.discardPreview();
+        assert.deepEqual(discarded.operations, [{
+            operation: IndicatorPatchOperation.Remove,
+            outputId: 'value',
+            targetIndex: 2,
+        }]);
     });
 
     it('retains unresolved forward outputs across streaming compaction', () => {

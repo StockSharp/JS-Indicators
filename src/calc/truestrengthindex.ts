@@ -114,19 +114,19 @@ export class TrueStrengthIndexProcessor extends SequentialIndicatorProcessor<
             : doubleAbsoluteMomentum === 0
                 ? 0
                 : finite(100 * doubleMomentum / doubleAbsoluteMomentum);
-        const tsi = input.index >= this.secondLength ? rawTsi : null;
-        const rawSignal = tsi === null
+        const tsiFormed = this.doubleMomentum.isFormed
+            && this.doubleAbsoluteMomentum.isFormed;
+        const tsi = tsiFormed ? rawTsi : null;
+        const rawSignal = !tsiFormed || tsi === null
             ? null
             : commit ? this.signal.push(tsi) : this.signal.preview(tsi);
-        const signal = input.index >= this.secondLength + this.signalLength - 1
-            ? rawSignal
-            : null;
+        const signal = this.signal.isFormed ? rawSignal : null;
         if (commit) this.previousClose = currentClose;
         return {
-            isFormed: signal !== null,
+            isFormed: this.signal.isFormed,
             values: [
-                this.output('tsi', tsi, input.index),
-                this.output('signal', signal, input.index),
+                this.formedOutput('tsi', tsi, tsiFormed, input.index),
+                this.formedOutput('signal', signal, this.signal.isFormed, input.index),
             ],
         };
     }

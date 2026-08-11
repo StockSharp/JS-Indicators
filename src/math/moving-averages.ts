@@ -20,15 +20,16 @@ export class SimpleMovingAverage {
     }
     get isFormed(): boolean { return this.sum.isFormed; }
     get value(): number | null {
-        const value = this.sum.value;
+        const value = this.sum.partialValue;
         return value === null ? null : value / this.windowLength;
     }
     push(value: NumericValue): number | null {
-        const sum = this.sum.push(value);
+        this.sum.push(value);
+        const sum = this.sum.partialValue;
         return sum === null ? null : sum / this.windowLength;
     }
     preview(value: NumericValue): number | null {
-        const sum = this.sum.preview(value);
+        const sum = this.sum.previewPartial(value);
         return sum === null ? null : sum / this.windowLength;
     }
     reset(): void { this.sum.reset(); }
@@ -497,12 +498,20 @@ abstract class SeededMovingAverage {
     private previous = 0;
     private poisoned = false;
 
-    constructor(readonly windowLength: number, private readonly poisonAfterGap: boolean) {
+    constructor(
+        readonly windowLength: number,
+        private readonly poisonAfterGap: boolean,
+        private readonly emitPartialSeed: boolean,
+    ) {
         length(windowLength);
     }
 
     get isFormed(): boolean { return this.formed && !this.poisoned; }
-    get value(): number | null { return this.isFormed ? this.previous : null; }
+    get value(): number | null {
+        return this.isFormed || (
+            this.emitPartialSeed && this.count > 0 && this.seedValid && !this.poisoned
+        ) ? this.previous : null;
+    }
 
     push(value: NumericValue): number | null {
         const result = this.evaluate(value);
@@ -572,7 +581,11 @@ abstract class SeededMovingAverage {
         } else if (!formed) {
             count += 1;
             if (incoming === null) seedValid = false;
-            else seedSum += incoming;
+            else {
+                seedSum += incoming;
+                previous = seedSum / this.windowLength;
+                if (this.emitPartialSeed) output = previous;
+            }
             if (count >= this.windowLength) {
                 if (seedValid) {
                     previous = seedSum / this.windowLength;
@@ -596,7 +609,7 @@ abstract class SeededMovingAverage {
 export class ExponentialMovingAverage extends SeededMovingAverage {
     private readonly multiplier: number;
     constructor(windowLength: number) {
-        super(windowLength, false);
+        super(windowLength, false, true);
         this.multiplier = 2 / (windowLength + 1);
     }
     protected next(previous: number, value: number): number {
@@ -605,7 +618,7 @@ export class ExponentialMovingAverage extends SeededMovingAverage {
 }
 
 export class WilderMovingAverage extends SeededMovingAverage {
-    constructor(windowLength: number) { super(windowLength, true); }
+    constructor(windowLength: number) { super(windowLength, true, false); }
     protected next(previous: number, value: number): number {
         return (previous * (this.windowLength - 1) + value) / this.windowLength;
     }

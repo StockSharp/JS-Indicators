@@ -72,6 +72,7 @@ export function lengthParameter(defaultValue: number, minimum = 1) {
 
 export interface RelativeStrengthIndexCheckpoint {
     readonly previousClose: number | null;
+    readonly previousResult: number | null;
     readonly validDeltas: number;
     readonly gain: SmoothedMovingAverageCheckpoint;
     readonly loss: SmoothedMovingAverageCheckpoint;
@@ -82,6 +83,7 @@ export class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor
     RelativeStrengthIndexCheckpoint
 > {
     private previousClose: number | null = null;
+    private previousResult: number | null = null;
     private validDeltas = 0;
     private readonly gain: SmoothedMovingAverage;
     private readonly loss: SmoothedMovingAverage;
@@ -117,16 +119,26 @@ export class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor
             : this.validDeltas + (delta === null ? 0 : 1) >= this.length;
         if (formed && averageGain !== null && averageLoss !== null) {
             const total = averageGain + averageLoss;
-            value = total === 0 ? 50 : 100 * averageGain / total;
+            value = delta === 0 && this.previousResult !== null
+                ? this.previousResult
+                : total === 0
+                    ? (this.previousResult ?? 50)
+                    : averageLoss === 0
+                        ? 100
+                        : averageGain === 0
+                            ? 0
+                            : Math.max(0, Math.min(100, 100 * averageGain / total));
+            if (commit && total !== 0) this.previousResult = value;
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.gain.isFormed,
             values: [this.output('oscillator', value, input.index)],
         };
     }
 
     protected resetState(): void {
         this.previousClose = null;
+        this.previousResult = null;
         this.validDeltas = 0;
         this.gain.reset();
         this.loss.reset();
@@ -135,6 +147,7 @@ export class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor
     protected captureState(): RelativeStrengthIndexCheckpoint {
         return Object.freeze({
             previousClose: this.previousClose,
+            previousResult: this.previousResult,
             validDeltas: this.validDeltas,
             gain: this.gain.checkpoint(),
             loss: this.loss.checkpoint(),
@@ -144,6 +157,7 @@ export class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor
     protected restoreState(state: RelativeStrengthIndexCheckpoint): void {
         if (state === null || typeof state !== 'object'
             || (state.previousClose !== null && finite(state.previousClose) === null)
+            || (state.previousResult !== null && finite(state.previousResult) === null)
             || !Number.isInteger(state.validDeltas)
             || state.validDeltas < 0 || state.validDeltas > this.length
             || state.gain?.count !== state.validDeltas
@@ -153,6 +167,7 @@ export class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor
         this.gain.restore(state.gain);
         this.loss.restore(state.loss);
         this.previousClose = state.previousClose;
+        this.previousResult = state.previousResult;
         this.validDeltas = state.validDeltas;
     }
 }

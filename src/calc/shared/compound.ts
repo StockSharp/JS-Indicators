@@ -57,6 +57,8 @@ export class FiniteExponentialAverage {
         this.multiplier = 2 / (length + 1);
     }
 
+    get isFormed(): boolean { return this.formed; }
+
     push(value: number | null): number | null {
         const next = this.evaluate(value);
         this.count = next.count;
@@ -114,13 +116,13 @@ export class FiniteExponentialAverage {
             const count = this.count + 1;
             const seedSum = this.seedSum + value;
             const formed = count === this.length;
-            const previous = formed ? seedSum / this.length : this.previous;
+            const previous = seedSum / this.length;
             return {
                 count,
                 seedSum,
                 formed,
                 previous,
-                value: formed ? previous : null,
+                value: previous,
             };
         }
         const previous = (value - this.previous) * this.multiplier + this.previous;
@@ -161,6 +163,9 @@ export class MacdKernel {
         this.signal = new FiniteExponentialAverage(signalLength);
     }
 
+    get macdIsFormed(): boolean { return this.slow.isFormed; }
+    get signalIsFormed(): boolean { return this.signal.isFormed; }
+
     push(value: number | null): MacdEvaluation { return this.evaluate(value, true); }
     preview(value: number | null): MacdEvaluation { return this.evaluate(value, false); }
 
@@ -190,7 +195,12 @@ export class MacdKernel {
         const fast = commit ? this.fast.push(value) : this.fast.preview(value);
         const slow = commit ? this.slow.push(value) : this.slow.preview(value);
         const macd = fast === null || slow === null ? null : fast - slow;
-        const signal = commit ? this.signal.push(macd) : this.signal.preview(macd);
+        // StockSharp's sequence-mode complex indicator does not feed the signal
+        // average until the MACD (its slow EMA) has formed.
+        const signalInput = this.slow.isFormed ? macd : null;
+        const signal = commit
+            ? this.signal.push(signalInput)
+            : this.signal.preview(signalInput);
         const histogram = macd === null || signal === null ? null : macd - signal;
         return { macd, signal, histogram };
     }

@@ -85,10 +85,16 @@ export class ElderImpulseProcessor extends SequentialIndicatorProcessor<
         let value: number | null = null;
         let state: 'green' | 'blue' | 'red' | null = null;
         if (formed) {
-            if (ema > this.previousEma! && macd > this.previousMacd!) {
+            const emaTolerance = Number.EPSILON
+                * Math.max(1, Math.abs(ema), Math.abs(this.previousEma!)) * 128;
+            const macdTolerance = Number.EPSILON
+                * Math.max(1, Math.abs(macd), Math.abs(this.previousMacd!)) * 128;
+            if (ema - this.previousEma! > emaTolerance
+                && macd - this.previousMacd! > macdTolerance) {
                 value = 1;
                 state = 'green';
-            } else if (ema < this.previousEma! && macd < this.previousMacd!) {
+            } else if (this.previousEma! - ema > emaTolerance
+                && this.previousMacd! - macd > macdTolerance) {
                 value = -1;
                 state = 'red';
             } else {
@@ -161,10 +167,12 @@ export const ElderImpulseIndicator: IndicatorDefinition<
         {
             id: 'shortMaLength', name: 'Fast Length', type: IndicatorParameterType.Integer,
             defaultValue: 12, min: 1, max: 500, step: 1,
+            aliases: ['macdShortMaLength'],
         },
         {
             id: 'longMaLength', name: 'Slow Length', type: IndicatorParameterType.Integer,
             defaultValue: 26, min: 1, max: 500, step: 1,
+            aliases: ['macdLongMaLength'],
         },
     ],
     outputs: [{
@@ -178,7 +186,7 @@ export const ElderImpulseIndicator: IndicatorDefinition<
     levels: [0],
     processorFactory: (parameters) => new ElderImpulseProcessor(
         integer(parameters?.emaLength, 13, 1, 500, 'emaLength'),
-        integer(parameters?.shortMaLength, 12, 1, 500, 'shortMaLength'),
-        integer(parameters?.longMaLength, 26, 1, 500, 'longMaLength'),
+        integer(parameters?.shortMaLength ?? parameters?.macdShortMaLength, 12, 1, 500, 'shortMaLength'),
+        integer(parameters?.longMaLength ?? parameters?.macdLongMaLength, 26, 1, 500, 'longMaLength'),
     ),
 });

@@ -51,7 +51,7 @@ export class DisparityIndexProcessor extends SequentialIndicatorProcessor<
             ? null
             : finite((close - average) / average * 100);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

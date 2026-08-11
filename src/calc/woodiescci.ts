@@ -77,10 +77,10 @@ export class WoodiesCciProcessor extends SequentialIndicatorProcessor<
         }
         const signal = commit ? this.signal.push(cci) : this.signal.preview(cci);
         return {
-            isFormed: signal !== null,
+            isFormed: this.signal.isFormed,
             values: [
-                this.output('cci', cci, input.index),
-                this.output('signal', signal, input.index),
+                this.formedOutput('cci', cci, true, input.index),
+                this.formedOutput('signal', signal, this.signal.isFormed, input.index),
             ],
         };
     }
@@ -122,6 +122,7 @@ export const WoodiesCciIndicator: IndicatorDefinition<
         {
             id: 'smaLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
             defaultValue: 6, min: 1, max: 500, step: 1,
+            aliases: ['sMALength', 'smalength'],
         },
     ],
     outputs: [

@@ -67,19 +67,21 @@ export class GuppyMultipleMovingAverageProcessor extends SequentialIndicatorProc
             commit ? average.push(close) : average.preview(close)
         ));
         const values = [
-            ...short.map((value, index) => this.output(
+            ...short.map((value, index) => this.formedOutput(
                 `short${GMMA_SHORT_LENGTHS[index]}`,
                 value,
+                this.short[index].isFormed,
                 input.index,
             )),
-            ...long.map((value, index) => this.output(
+            ...long.map((value, index) => this.formedOutput(
                 `long${GMMA_LONG_LENGTHS[index]}`,
                 value,
+                this.long[index].isFormed,
                 input.index,
             )),
         ];
         return {
-            isFormed: long[long.length - 1] !== null,
+            isFormed: this.long[this.long.length - 1].isFormed,
             values,
         };
     }

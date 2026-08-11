@@ -76,21 +76,22 @@ export class WaveTrendOscillatorProcessor extends SequentialIndicatorProcessor<
 
         const typical = (high + low + close) / 3;
         const esa = commit ? this.esa.push(typical) : this.esa.preview(typical);
-        if (esa === null) return this.empty(input.index);
+        if (esa === null || !this.esa.isFormed) return this.empty(input.index);
 
         const difference = Math.abs(typical - esa);
         const deviation = commit
             ? this.deviation.push(difference)
             : this.deviation.preview(difference);
-        if (deviation === null || deviation === 0) return this.empty(input.index);
+        if (deviation === null || !this.deviation.isFormed || deviation === 0)
+            return this.empty(input.index);
 
         const wt1 = (typical - esa) / (0.015 * deviation);
         const wt2 = commit ? this.average.push(wt1) : this.average.preview(wt1);
         return {
-            isFormed: wt2 !== null,
+            isFormed: true,
             values: [
-                this.output('wt1', wt1, input.index),
-                this.output('wt2', wt2, input.index),
+                this.formedOutput('wt1', wt1, true, input.index),
+                this.formedOutput('wt2', wt2, true, input.index),
             ],
         };
     }

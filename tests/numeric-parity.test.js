@@ -145,7 +145,14 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
 
             for (let pi = 0; pi < dump.data.probes.length; pi++) {
                 const p = dump.data.probes[pi];
-                const candles = base.concat([{ time: base.length, open: p.o, high: p.h, low: p.l, close: p.c, volume: p.v }]);
+                const candles = base.concat([{
+                    time: base[base.length - 1].time + 60,
+                    open: p.o,
+                    high: p.h,
+                    low: p.l,
+                    close: p.c,
+                    volume: p.v,
+                }]);
                 // The platform made these numbers with IsFinal=false, so the probe goes in as a
                 // preview here too. Appending it as a closed candle compared an open bar against a
                 // finished one and called the difference parity.

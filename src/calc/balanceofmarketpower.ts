@@ -56,7 +56,7 @@ export class BalanceOfMarketPowerProcessor extends SequentialIndicatorProcessor<
         }
         const value = commit ? this.average.push(raw) : this.average.preview(raw);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

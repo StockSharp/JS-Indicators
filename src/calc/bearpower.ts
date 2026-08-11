@@ -47,7 +47,7 @@ export class BearPowerProcessor extends SequentialIndicatorProcessor<
         const average = commit ? this.average.push(close) : this.average.preview(close);
         const value = average === null || low === null ? null : low - average;
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

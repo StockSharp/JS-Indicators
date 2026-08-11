@@ -83,8 +83,11 @@ export class TwiggsMoneyFlowProcessor extends SequentialIndicatorProcessor<
             : this.volume.preview(incomingVolume);
         if (commit) this.previousAdvanceDecline = advanceDecline;
 
-        const formed = averageAdvanceDecline !== null && averageVolume !== null;
-        const ratio = !formed || averageVolume === 0
+        const formed = this.advanceDecline.isFormed && this.volume.isFormed;
+        const ratio = !formed
+            || averageAdvanceDecline === null
+            || averageVolume === null
+            || averageVolume === 0
             ? null
             : finite(averageAdvanceDecline / averageVolume);
         const value = ratio === 0 ? null : ratio;

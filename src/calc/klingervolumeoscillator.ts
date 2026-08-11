@@ -72,11 +72,11 @@ export class KlingerVolumeOscillatorProcessor extends SequentialIndicatorProcess
         if (commit && typical !== null) this.previousHlc = typical;
         const oscillator = short === null || long === null ? null : finite(short - long);
         return {
-            isFormed: oscillator !== null,
+            isFormed: this.short.isFormed && this.long.isFormed,
             values: [
-                this.output('shortEma', short, input.index),
-                this.output('longEma', long, input.index),
-                this.output('oscillator', oscillator, input.index),
+                this.formedOutput('shortEma', short, this.short.isFormed, input.index),
+                this.formedOutput('longEma', long, this.long.isFormed, input.index),
+                this.formedOutput('oscillator', oscillator, this.short.isFormed && this.long.isFormed, input.index),
             ],
         };
     }

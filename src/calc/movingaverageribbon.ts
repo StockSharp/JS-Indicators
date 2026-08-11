@@ -104,12 +104,17 @@ export class MovingAverageRibbonProcessor extends SequentialIndicatorProcessor<
             let value: number | null = null;
             if (current !== null) {
                 value = commit ? average.push(current) : average.preview(current);
-                current = value;
+                current = average.isFormed ? value : null;
             }
-            return this.output(`ribbon${index}`, value, input.index);
+            return this.formedOutput(
+                `ribbon${index}`,
+                value,
+                average.isFormed,
+                input.index,
+            );
         });
         return {
-            isFormed: values[values.length - 1].value !== null,
+            isFormed: this.averages[this.averages.length - 1].isFormed,
             values,
         };
     }

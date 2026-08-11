@@ -55,10 +55,13 @@ export class DoubleExponentialMovingAverageProcessor extends SequentialIndicator
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const first = commit ? this.first.push(close) : this.first.preview(close);
-        const second = commit ? this.second.push(first) : this.second.preview(first);
+        const secondInput = this.first.isFormed ? first : null;
+        const second = commit
+            ? this.second.push(secondInput)
+            : this.second.preview(secondInput);
         const value = first === null || second === null ? null : 2 * first - second;
         return {
-            isFormed: value !== null,
+            isFormed: this.second.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

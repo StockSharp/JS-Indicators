@@ -12,7 +12,13 @@ function length(value: number): number {
     return value;
 }
 
-export type RollingWindowCheckpoint = RingBufferCheckpoint<number | null>;
+export interface RollingWindowCheckpoint extends RingBufferCheckpoint<number | null> {
+    /** Exact accumulator state, present for rolling sums and their SMA wrappers. */
+    readonly sum?: number;
+    readonly invalid?: number;
+    /** Exact online state, present for rolling variance/deviation wrappers. */
+    readonly variance?: Readonly<VarianceState>;
+}
 
 /** Finite-only rolling sum; output is null until the complete window is valid. */
 export class RollingSum {
@@ -26,12 +32,16 @@ export class RollingSum {
 
     get isFormed(): boolean { return this.buffer.full && this.invalid === 0; }
     get value(): number | null { return this.isFormed ? this.sum : null; }
+    get partialValue(): number | null {
+        return this.buffer.size > 0 && this.invalid === 0 ? this.sum : null;
+    }
 
     push(value: NumericValue): number | null {
         const incoming = numeric(value);
         if (this.buffer.full) this.remove(this.buffer.front() ?? null);
         this.buffer.push(incoming);
         this.add(incoming);
+        this.recalculateSum();
         return this.value;
     }
 
@@ -42,10 +52,19 @@ export class RollingSum {
         const nextInvalid = this.invalid
             - (this.buffer.full && outgoing === null ? 1 : 0)
             + (incoming === null ? 1 : 0);
-        const nextSum = this.sum
-            - (this.buffer.full && outgoing !== null ? outgoing : 0)
-            + (incoming ?? 0);
+        const nextSum = this.previewSum(incoming);
         return nextSize === this.windowLength && nextInvalid === 0 ? nextSum : null;
+    }
+
+    previewPartial(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        const outgoing = this.buffer.full ? (this.buffer.front() ?? null) : null;
+        const nextSize = Math.min(this.windowLength, this.buffer.size + 1);
+        const nextInvalid = this.invalid
+            - (this.buffer.full && outgoing === null ? 1 : 0)
+            + (incoming === null ? 1 : 0);
+        const nextSum = this.previewSum(incoming);
+        return nextSize > 0 && nextInvalid === 0 ? nextSum : null;
     }
 
     reset(): void {
@@ -54,12 +73,25 @@ export class RollingSum {
         this.invalid = 0;
     }
 
-    checkpoint(): RollingWindowCheckpoint { return this.buffer.checkpoint(); }
+    checkpoint(): RollingWindowCheckpoint {
+        return Object.freeze({
+            values: this.buffer.checkpoint().values,
+            sum: this.sum,
+            invalid: this.invalid,
+        });
+    }
 
     restore(checkpoint: RollingWindowCheckpoint): void {
         this.reset();
         this.buffer.restore(checkpoint);
-        for (const value of checkpoint.values) this.add(value);
+        const invalid = checkpoint.invalid;
+        if (typeof checkpoint.sum === 'number' && Number.isFinite(checkpoint.sum)
+            && typeof invalid === 'number' && Number.isInteger(invalid) && invalid >= 0) {
+            this.sum = checkpoint.sum;
+            this.invalid = invalid;
+        } else {
+            for (const value of checkpoint.values) this.add(value);
+        }
     }
 
     private add(value: number | null): void {
@@ -70,6 +102,22 @@ export class RollingSum {
     private remove(value: number | null): void {
         if (value === null) this.invalid -= 1;
         else this.sum -= value;
+    }
+
+    private recalculateSum(): void {
+        let sum = 0;
+        for (let index = 0; index < this.buffer.size; index += 1)
+            sum += this.buffer.at(index) ?? 0;
+        this.sum = sum;
+    }
+
+    private previewSum(incoming: number | null): number {
+        let sum = 0;
+        const start = this.buffer.full ? 1 : 0;
+        for (let index = start; index < this.buffer.size; index += 1)
+            sum += this.buffer.at(index) ?? 0;
+        sum += incoming ?? 0;
+        return sum;
     }
 }
 
@@ -256,7 +304,7 @@ export class RollingVariance {
     get value(): number | null {
         if (!this.isFormed) return null;
         const denominator = this.state.count - (this.sample ? 1 : 0);
-        return Math.max(0, this.state.m2 / denominator);
+        return this.normalized(this.state) / denominator;
     }
 
     push(value: NumericValue): number | null {
@@ -267,21 +315,17 @@ export class RollingVariance {
         }
         this.buffer.push(incoming);
         if (incoming !== null) addVariance(this.state, incoming);
+        this.recalculateState();
         return this.value;
     }
 
     preview(value: NumericValue): number | null {
         const incoming = numeric(value);
-        const next: VarianceState = { ...this.state };
-        if (this.buffer.full) {
-            const outgoing = this.buffer.front();
-            if (outgoing !== null && outgoing !== undefined) removeVariance(next, outgoing);
-        }
-        if (incoming !== null) addVariance(next, incoming);
+        const next = this.previewState(incoming);
         const nextSize = Math.min(this.windowLength, this.buffer.size + 1);
         if (nextSize !== this.windowLength || next.count !== this.windowLength
             || (this.sample && this.windowLength <= 1)) return null;
-        return Math.max(0, next.m2 / (next.count - (this.sample ? 1 : 0)));
+        return this.normalized(next) / (next.count - (this.sample ? 1 : 0));
     }
 
     reset(): void {
@@ -291,7 +335,12 @@ export class RollingVariance {
         this.state.m2 = 0;
     }
 
-    checkpoint(): RollingWindowCheckpoint { return this.buffer.checkpoint(); }
+    checkpoint(): RollingWindowCheckpoint {
+        return Object.freeze({
+            values: this.buffer.checkpoint().values,
+            variance: Object.freeze({ ...this.state }),
+        });
+    }
 
     restore(checkpoint: RollingWindowCheckpoint): void {
         if (checkpoint === null || typeof checkpoint !== 'object'
@@ -300,7 +349,59 @@ export class RollingVariance {
             throw new TypeError('sschart: invalid rolling variance checkpoint');
         }
         this.reset();
-        for (const value of checkpoint.values) this.push(value);
+        this.buffer.restore(checkpoint);
+        const state = checkpoint.variance;
+        if (state !== undefined
+            && Number.isInteger(state.count) && state.count >= 0
+            && typeof state.mean === 'number' && Number.isFinite(state.mean)
+            && typeof state.m2 === 'number' && Number.isFinite(state.m2)) {
+            this.state.count = state.count;
+            this.state.mean = state.mean;
+            this.state.m2 = state.m2;
+        } else {
+            for (const value of checkpoint.values) {
+                if (value !== null) addVariance(this.state, value);
+            }
+        }
+    }
+
+    private normalized(state: VarianceState): number {
+        const scale = Math.max(1, Math.abs(state.mean));
+        const roundoff = Number.EPSILON * scale * scale * state.count * 128;
+        return state.m2 <= roundoff ? 0 : state.m2;
+    }
+
+    private recalculateState(): void {
+        const values: number[] = [];
+        for (let index = 0; index < this.buffer.size; index += 1) {
+            const value = this.buffer.at(index);
+            if (value !== null && value !== undefined) values.push(value);
+        }
+        Object.assign(this.state, this.stateOf(values));
+    }
+
+    private previewState(incoming: number | null): VarianceState {
+        const values: number[] = [];
+        const start = this.buffer.full ? 1 : 0;
+        for (let index = start; index < this.buffer.size; index += 1) {
+            const value = this.buffer.at(index);
+            if (value !== null && value !== undefined) values.push(value);
+        }
+        if (incoming !== null) values.push(incoming);
+        return this.stateOf(values);
+    }
+
+    private stateOf(values: readonly number[]): VarianceState {
+        if (values.length === 0) return { count: 0, mean: 0, m2: 0 };
+        let sum = 0;
+        for (const value of values) sum += value;
+        const mean = sum / values.length;
+        let m2 = 0;
+        for (const value of values) {
+            const delta = value - mean;
+            m2 += delta * delta;
+        }
+        return { count: values.length, mean, m2 };
     }
 }
 

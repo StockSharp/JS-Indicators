@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const {
     IndicatorRuntime,
     JurikMovingAverageIndicator,
+    MovingAverageConvergenceDivergenceIndicator,
+    SimpleMovingAverageIndicator,
 } = require('../src/index.js');
 
 function bars(count = 80) {
@@ -52,6 +54,30 @@ function assertPoints(runtime, expected, epsilon = 1e-10) {
 }
 
 describe('core incremental indicator definitions', () => {
+
+    it('uses warm-up values internally but exposes them only after platform formation', () => {
+        const source = [1, 2, 3].map((close, index) => ({
+            time: index + 1, open: close, high: close, low: close, close, volume: 1,
+        }));
+        const average = new IndicatorRuntime({
+            definition: SimpleMovingAverageIndicator,
+            parameters: { length: 3 },
+        });
+        average.update(input(source[0]), true);
+        average.update(input(source[1]), true);
+        assert.deepEqual(average.points('line'), []);
+        average.update(input(source[2]), true);
+        assert.equal(average.points('line').length, 1);
+        assert.equal(average.points('line')[0].value, 2);
+
+        const macd = new IndicatorRuntime({
+            definition: MovingAverageConvergenceDivergenceIndicator,
+            parameters: { shortMaLength: 3, longMaLength: 1 },
+        });
+        macd.update(input(source[2]), true);
+        assert.equal(macd.points('macd').length, 1);
+        assert.equal(macd.points('macd')[0].value, -2);
+    });
 
     it('Jurik Moving Average preserves warm-up position across invalid closes', () => {
         const source = bars(10);

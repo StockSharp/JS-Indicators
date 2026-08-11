@@ -52,9 +52,9 @@ export class ForceIndexProcessor extends SequentialIndicatorProcessor<
         commit: boolean,
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
-        if (!this.initialized) {
+        if (this.previousClose === null || this.previousClose === 0) {
             if (commit) {
-                this.initialized = true;
+                this.initialized = close !== null && close !== 0;
                 this.previousClose = close;
             }
             return {
@@ -72,7 +72,7 @@ export class ForceIndexProcessor extends SequentialIndicatorProcessor<
             : (commit ? this.average.push(force) : this.average.preview(force));
         if (commit) this.previousClose = close;
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

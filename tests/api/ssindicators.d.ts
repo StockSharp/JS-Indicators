@@ -351,13 +351,17 @@ import { BollingerBandsCheckpoint } from './shared/compound.js';
 export interface BollingerBandsParameters extends IndicatorParameters {
     readonly length: number;
     readonly width: number;
+    readonly upBandWidth: number;
+    readonly lowBandWidth: number;
 }
 export declare class BollingerBandsProcessor extends SequentialIndicatorProcessor<IndicatorCandle, BollingerBandsCheckpoint> {
     readonly length: number;
-    readonly multiplier: number;
+    readonly width: number;
+    readonly upBandWidth: number;
+    readonly lowBandWidth: number;
     private readonly average;
     private readonly deviation;
-    constructor(length: number, multiplier: number);
+    constructor(length: number, width: number, upBandWidth: number, lowBandWidth: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
     protected resetState(): void;
     protected captureState(): BollingerBandsCheckpoint;
@@ -649,6 +653,7 @@ export interface ConnorsRsiParameters extends IndicatorParameters {
 export interface ArrayRsiCheckpoint {
     readonly initialized: boolean;
     readonly previous: number | null;
+    readonly previousResult: number | null;
     readonly gain: SmoothedMovingAverageCheckpoint;
     readonly loss: SmoothedMovingAverageCheckpoint;
 }
@@ -656,6 +661,7 @@ export declare class ArrayRsiKernel {
     readonly length: number;
     private initialized;
     private previous;
+    private previousResult;
     private readonly gain;
     private readonly loss;
     constructor(length: number);
@@ -1543,8 +1549,8 @@ import { type IndicatorCandle, type IndicatorDefinition, type IndicatorParameter
 import { SequentialIndicatorProcessor, type IndicatorCalculationResult } from '../sequential-processor.js';
 import { type RollingWindowCheckpoint } from '../math/index.js';
 export declare function parameter(values: IchimokuParameters, name: 'tenkanLength' | 'kijunLength' | 'senkouBLength', alias: 'tenkanPeriod' | 'kijunPeriod' | 'senkouBPeriod', fallback: number, maximum: number): number;
-export declare function lengthParameter(id: 'tenkanLength' | 'kijunLength' | 'senkouBLength', name: string, defaultValue: number, maximum: number): {
-    readonly id: "kijunLength" | "senkouBLength" | "tenkanLength";
+export declare function lengthParameter(id: 'tenkanLength' | 'kijunLength' | 'senkouBLength' | 'chinkouLength', name: string, defaultValue: number, maximum: number): {
+    readonly id: "chinkouLength" | "kijunLength" | "senkouBLength" | "tenkanLength";
     readonly name: string;
     readonly type: "integer";
     readonly defaultValue: number;
@@ -1556,6 +1562,7 @@ export interface IchimokuParameters extends IndicatorParameters {
     readonly tenkanLength: number;
     readonly kijunLength: number;
     readonly senkouBLength: number;
+    readonly chinkouLength: number;
 }
 export interface IchimokuCheckpoint {
     readonly tenkanHigh: RollingWindowCheckpoint;
@@ -1569,13 +1576,14 @@ export declare class IchimokuProcessor extends SequentialIndicatorProcessor<Indi
     readonly tenkanLength: number;
     readonly kijunLength: number;
     readonly senkouBLength: number;
+    readonly chinkouLength: number;
     private readonly tenkanHigh;
     private readonly tenkanLow;
     private readonly kijunHigh;
     private readonly kijunLow;
     private readonly senkouBHigh;
     private readonly senkouBLow;
-    constructor(tenkanLength: number, kijunLength: number, senkouBLength: number);
+    constructor(tenkanLength: number, kijunLength: number, senkouBLength: number, chinkouLength: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
     protected resetState(): void;
     protected captureState(): IchimokuCheckpoint;
@@ -1861,7 +1869,6 @@ import { type IndicatorCandle, type IndicatorDefinition, type IndicatorParameter
 import { SequentialIndicatorProcessor, type IndicatorCalculationResult } from '../sequential-processor.js';
 import { type ExpandingAverageTrueRangeCheckpoint, type RingBufferCheckpoint } from '../math/index.js';
 export interface KasePeakOscillatorParameters extends IndicatorParameters {
-    readonly shortTermLength: number;
     readonly shortPeriod: number;
     readonly longPeriod: number;
 }
@@ -1872,14 +1879,13 @@ export interface KasePeakOscillatorCheckpoint {
     readonly previousClose: number;
 }
 export declare class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<IndicatorCandle, KasePeakOscillatorCheckpoint> {
-    readonly shortTermLength: number;
     readonly shortPeriod: number;
     readonly longPeriod: number;
     private readonly averageTrueRange;
     private readonly peaks;
     private readonly valleys;
     private previousClose;
-    constructor(shortTermLength: number, shortPeriod: number, longPeriod: number);
+    constructor(shortPeriod: number, longPeriod: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
     protected resetState(): void;
     protected captureState(): KasePeakOscillatorCheckpoint;
@@ -3202,6 +3208,7 @@ export declare class FiniteExponentialAverage {
     private previous;
     private readonly multiplier;
     constructor(length: number);
+    get isFormed(): boolean;
     push(value: number | null): number | null;
     preview(value: number | null): number | null;
     reset(): void;
@@ -3227,6 +3234,8 @@ export declare class MacdKernel {
     private readonly slow;
     private readonly signal;
     constructor(fastLength: number, slowLength: number, signalLength: number);
+    get macdIsFormed(): boolean;
+    get signalIsFormed(): boolean;
     push(value: number | null): MacdEvaluation;
     preview(value: number | null): MacdEvaluation;
     reset(): void;
@@ -3305,6 +3314,7 @@ export declare function lengthParameter(defaultValue: number, minimum?: number):
 };
 export interface RelativeStrengthIndexCheckpoint {
     readonly previousClose: number | null;
+    readonly previousResult: number | null;
     readonly validDeltas: number;
     readonly gain: SmoothedMovingAverageCheckpoint;
     readonly loss: SmoothedMovingAverageCheckpoint;
@@ -3312,6 +3322,7 @@ export interface RelativeStrengthIndexCheckpoint {
 export declare class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor<IndicatorCandle, RelativeStrengthIndexCheckpoint> {
     readonly length: number;
     private previousClose;
+    private previousResult;
     private validDeltas;
     private readonly gain;
     private readonly loss;
@@ -3851,26 +3862,31 @@ export declare const TripleExponentialMovingAverageIndicator: IndicatorDefinitio
 // Public API module: calc/trix.d.ts
 import { type IndicatorCandle, type IndicatorDefinition, type IndicatorProcessInput } from '../indicator-definition.js';
 import { SequentialIndicatorProcessor, type IndicatorCalculationResult } from '../sequential-processor.js';
+import { type RingBufferCheckpoint } from '../math/index.js';
 import { CompoundLengthParameters, FiniteExponentialCheckpoint } from './shared/compound.js';
 export interface TrixCheckpoint {
     readonly first: FiniteExponentialCheckpoint;
     readonly second: FiniteExponentialCheckpoint;
     readonly third: FiniteExponentialCheckpoint;
-    readonly previous: number | null;
+    readonly rateOfChange: RingBufferCheckpoint<number>;
+}
+export interface TrixParameters extends CompoundLengthParameters {
+    readonly rocLength: number;
 }
 export declare class TrixProcessor extends SequentialIndicatorProcessor<IndicatorCandle, TrixCheckpoint> {
     readonly length: number;
+    readonly rocLength: number;
     private readonly first;
     private readonly second;
     private readonly third;
-    private previous;
-    constructor(length: number);
+    private readonly rateOfChange;
+    constructor(length: number, rocLength: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
     protected resetState(): void;
     protected captureState(): TrixCheckpoint;
     protected restoreState(state: TrixCheckpoint): void;
 }
-export declare const TrixIndicator: IndicatorDefinition<IndicatorCandle, CompoundLengthParameters>;
+export declare const TrixIndicator: IndicatorDefinition<IndicatorCandle, TrixParameters>;
 
 // Public API module: calc/trough.d.ts
 import { type IndicatorCandle, type IndicatorDefinition } from '../indicator-definition.js';
@@ -5014,13 +5030,14 @@ export interface SeededMovingAverageCheckpoint {
 declare abstract class SeededMovingAverage {
     readonly windowLength: number;
     private readonly poisonAfterGap;
+    private readonly emitPartialSeed;
     private count;
     private seedSum;
     private seedValid;
     private formed;
     private previous;
     private poisoned;
-    constructor(windowLength: number, poisonAfterGap: boolean);
+    constructor(windowLength: number, poisonAfterGap: boolean, emitPartialSeed: boolean);
     get isFormed(): boolean;
     get value(): number | null;
     push(value: NumericValue): number | null;
@@ -5047,6 +5064,7 @@ import { type SmoothedMovingAverageCheckpoint } from './moving-averages.js';
 export interface PartialRelativeStrengthIndexCheckpoint {
     readonly initialized: boolean;
     readonly previous: number | null;
+    readonly previousResult: number | null;
     readonly gain: SmoothedMovingAverageCheckpoint;
     readonly loss: SmoothedMovingAverageCheckpoint;
 }
@@ -5059,6 +5077,7 @@ export declare class PartialRelativeStrengthIndex {
     readonly length: number;
     private initialized;
     private previous;
+    private previousResult;
     private readonly gain;
     private readonly loss;
     constructor(length: number);
@@ -5097,7 +5116,13 @@ export declare class RingBuffer<T> {
 // Public API module: math/rolling-window.d.ts
 import { type RingBufferCheckpoint } from './ring-buffer.js';
 type NumericValue = number | null | undefined;
-export type RollingWindowCheckpoint = RingBufferCheckpoint<number | null>;
+export interface RollingWindowCheckpoint extends RingBufferCheckpoint<number | null> {
+    /** Exact accumulator state, present for rolling sums and their SMA wrappers. */
+    readonly sum?: number;
+    readonly invalid?: number;
+    /** Exact online state, present for rolling variance/deviation wrappers. */
+    readonly variance?: Readonly<VarianceState>;
+}
 /** Finite-only rolling sum; output is null until the complete window is valid. */
 export declare class RollingSum {
     readonly windowLength: number;
@@ -5107,13 +5132,17 @@ export declare class RollingSum {
     constructor(windowLength: number);
     get isFormed(): boolean;
     get value(): number | null;
+    get partialValue(): number | null;
     push(value: NumericValue): number | null;
     preview(value: NumericValue): number | null;
+    previewPartial(value: NumericValue): number | null;
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;
     private add;
     private remove;
+    private recalculateSum;
+    private previewSum;
 }
 export declare class RollingMinimum {
     readonly windowLength: number;
@@ -5143,6 +5172,11 @@ export declare class RollingMaximum {
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;
 }
+interface VarianceState {
+    count: number;
+    mean: number;
+    m2: number;
+}
 export declare class RollingVariance {
     readonly windowLength: number;
     readonly sample: boolean;
@@ -5156,6 +5190,10 @@ export declare class RollingVariance {
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;
+    private normalized;
+    private recalculateState;
+    private previewState;
+    private stateOf;
 }
 export declare class RollingStandardDeviation {
     readonly windowLength: number;
@@ -5267,14 +5305,20 @@ export declare class ExpandingAverageTrueRange {
 
 // Public API module: sequential-processor.d.ts
 import type { IIndicatorProcessor, IndicatorOutputMetadata, IndicatorOutputValue, IndicatorProcessInput, IndicatorProcessResult } from './indicator-definition.js';
+export interface IndicatorCalculationOutputValue extends IndicatorOutputValue {
+    /** Override the enclosing indicator's formation state for this output line. */
+    readonly isFormed?: boolean;
+}
 export interface IndicatorCalculationResult {
     readonly isFormed: boolean;
-    readonly values: readonly IndicatorOutputValue[];
+    readonly values: readonly IndicatorCalculationOutputValue[];
 }
 export interface SequentialIndicatorCheckpoint<TState> {
     readonly version: 1;
     readonly position: number;
     readonly formed: boolean;
+    /** Output-level formation latches. Missing only on checkpoints written by older builds. */
+    readonly formedOutputs?: readonly string[];
     readonly state: TState;
 }
 /**
@@ -5285,6 +5329,7 @@ export interface SequentialIndicatorCheckpoint<TState> {
 export declare abstract class SequentialIndicatorProcessor<TInput, TState> implements IIndicatorProcessor<TInput> {
     private positionValue;
     private formedValue;
+    private readonly formedOutputIds;
     private readonly outputIds;
     protected constructor(outputIds: readonly string[]);
     get position(): number;
@@ -5293,6 +5338,11 @@ export declare abstract class SequentialIndicatorProcessor<TInput, TState> imple
     checkpoint(): SequentialIndicatorCheckpoint<TState>;
     restore(checkpoint: SequentialIndicatorCheckpoint<TState>): void;
     protected output(outputIdValue: string, value: number | null, targetIndex?: number, metadata?: IndicatorOutputMetadata): IndicatorOutputValue;
+    /**
+     * Emit a line whose StockSharp inner indicator forms independently from the
+     * enclosing complex indicator.
+     */
+    protected formedOutput(outputIdValue: string, value: number | null, isFormed: boolean, targetIndex?: number, metadata?: IndicatorOutputMetadata): IndicatorCalculationOutputValue;
     protected abstract calculate(input: IndicatorProcessInput<TInput>, commit: boolean): IndicatorCalculationResult;
     protected abstract resetState(): void;
     protected abstract captureState(): TState;

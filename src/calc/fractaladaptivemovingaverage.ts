@@ -124,7 +124,7 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
         let dimension = (
             Math.log(firstDimension + secondDimension) - Math.log(thirdDimension)
         ) / Math.log(2);
-        if (!Number.isFinite(dimension)) dimension = 1;
+        if (Number.isNaN(dimension)) dimension = 1;
         else dimension = Math.max(1, Math.min(2, dimension));
         const alpha = Math.exp(-4.6 * (dimension - 1));
         const value = alpha * close + (1 - alpha) * this.previous;

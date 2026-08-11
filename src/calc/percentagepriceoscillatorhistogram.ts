@@ -71,14 +71,18 @@ export class PercentagePriceOscillatorHistogramProcessor extends SequentialIndic
         const ppo = short === null || long === null
             ? null
             : (long === 0 ? 0 : finite((short - long) / long * 100));
-        const signal = commit ? this.signal.push(ppo) : this.signal.preview(ppo);
+        const ppoFormed = this.short.isFormed && this.long.isFormed;
+        const signalInput = ppoFormed ? ppo : null;
+        const signal = commit
+            ? this.signal.push(signalInput)
+            : this.signal.preview(signalInput);
         const histogram = ppo === null || signal === null ? null : ppo - signal;
         return {
-            isFormed: histogram !== null,
+            isFormed: this.signal.isFormed,
             values: [
-                this.output('ppo', ppo, input.index),
-                this.output('signal', signal, input.index),
-                this.output('histogram', histogram, input.index),
+                this.formedOutput('ppo', ppo, ppoFormed, input.index),
+                this.formedOutput('signal', signal, this.signal.isFormed, input.index),
+                this.formedOutput('histogram', histogram, this.signal.isFormed, input.index),
             ],
         };
     }
@@ -120,10 +124,12 @@ export const PercentagePriceOscillatorHistogramIndicator: IndicatorDefinition<
         {
             id: 'shortPeriod', name: 'Short Length', type: IndicatorParameterType.Integer,
             defaultValue: 12, min: 1, max: 200, step: 1,
+            aliases: ['ppoShortPeriod'],
         },
         {
             id: 'longPeriod', name: 'Long Length', type: IndicatorParameterType.Integer,
             defaultValue: 26, min: 1, max: 400, step: 1,
+            aliases: ['ppoLongPeriod'],
         },
         {
             id: 'signalMaLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
@@ -139,7 +145,7 @@ export const PercentagePriceOscillatorHistogramIndicator: IndicatorDefinition<
         },
     ],
     naturalPane: IndicatorPane.Separate,
-    measure: IndicatorMeasure.Price,
+    measure: IndicatorMeasure.Percent,
     aliases: ['ppohistogram'],
     painter: 'ppo-histogram',
     levels: [0],

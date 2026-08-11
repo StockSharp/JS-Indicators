@@ -50,7 +50,7 @@ export class QStickProcessor extends SequentialIndicatorProcessor<
             ? this.average.push(difference)
             : this.average.preview(difference);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

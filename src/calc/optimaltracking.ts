@@ -71,7 +71,7 @@ export class OptimalTrackingProcessor extends SequentialIndicatorProcessor<
         // The platform takes the average into its buffer and only then asks whether it is full, so
         // the bar that fills it is already a calculated one.
         const seen = this.validCount + 1;
-        if (seen < this.length) {
+        if (this.validCount === 0 || seen < this.length) {
             if (commit) {
                 this.validCount = seen;
                 this.previousAverage = average;
@@ -79,8 +79,12 @@ export class OptimalTrackingProcessor extends SequentialIndicatorProcessor<
                 this.previousResult = average;
             }
             return {
-                isFormed: false,
-                values: [this.output('line', null, input.index)],
+                isFormed: seen >= this.length,
+                values: [this.output(
+                    'line',
+                    seen >= this.length ? average : null,
+                    input.index,
+                )],
             };
         }
 

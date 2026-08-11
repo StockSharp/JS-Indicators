@@ -70,12 +70,13 @@ export class AccelerationProcessor extends SequentialIndicatorProcessor<
         const short = commit ? this.short.push(median) : this.short.preview(median);
         const long = commit ? this.long.push(median) : this.long.preview(median);
         const awesome = short === null || long === null ? null : short - long;
+        const averageInput = this.long.isFormed ? awesome : null;
         const average = commit
-            ? this.average.push(awesome)
-            : this.average.preview(awesome);
+            ? this.average.push(averageInput)
+            : this.average.preview(averageInput);
         const value = awesome === null || average === null ? null : awesome - average;
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -114,10 +115,12 @@ export const AccelerationIndicator: IndicatorDefinition<
         {
             id: 'shortMaLength', name: 'Short Length', type: IndicatorParameterType.Integer,
             defaultValue: 5, min: 1, max: 500, step: 1,
+            aliases: ['aoShortMaLength'],
         },
         {
             id: 'longMaLength', name: 'Long Length', type: IndicatorParameterType.Integer,
             defaultValue: 34, min: 1, max: 500, step: 1,
+            aliases: ['aoLongMaLength'],
         },
         {
             id: 'smaLength', name: 'Average Length', type: IndicatorParameterType.Integer,

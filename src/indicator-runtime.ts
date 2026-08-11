@@ -1005,7 +1005,16 @@ export class IndicatorRuntime<
             }
             // Future targets are internal pending state, not drawable chart
             // points. Their first public operation is append when time resolves.
-            if (next.time === null) continue;
+            if (next.time === null) {
+                if (previous !== null && previous.time !== null) {
+                    operations.push(Object.freeze({
+                        operation: IndicatorPatchOperation.Remove,
+                        outputId: previous.outputId,
+                        targetIndex: previous.targetIndex,
+                    }));
+                }
+                continue;
+            }
             const firstDrawable = previous === null || previous.time === null;
             operations.push(Object.freeze({
                 operation: firstDrawable && allowAppend

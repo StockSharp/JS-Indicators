@@ -69,7 +69,7 @@ export class DemandIndexProcessor extends SequentialIndicatorProcessor<
         const volumeDelta = volume - this.previousVolume;
         if (priceDelta === 0 || volumeDelta === 0) {
             return {
-                isFormed: this.previousValue !== null,
+                isFormed: this.average.isFormed,
                 values: [this.output('line', this.previousValue, input.index)],
             };
         }
@@ -88,7 +88,7 @@ export class DemandIndexProcessor extends SequentialIndicatorProcessor<
             if (value !== null) this.previousValue = value;
         }
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -123,7 +123,7 @@ export class DemandIndexProcessor extends SequentialIndicatorProcessor<
             || (state.previousValue !== null && finite(state.previousValue) === null)
             || !Array.isArray(values) || values.length > this.length
             || values.some((value) => finite(value) === null)
-            || ((values.length === this.length) !== (state.previousValue !== null))
+            || ((values.length > 0) !== (state.previousValue !== null))
             || (state.previousValue !== null
                 && Math.abs(state.previousValue - rebuilt!) > tolerance)) {
             throw new TypeError('sschart: invalid Demand Index checkpoint');

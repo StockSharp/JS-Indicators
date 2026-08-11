@@ -53,11 +53,11 @@ export class MacdHistogramProcessor extends SequentialIndicatorProcessor<Indicat
             ? this.kernel.push(finite(input.value?.close))
             : this.kernel.preview(finite(input.value?.close));
         return {
-            isFormed: value.histogram !== null,
+            isFormed: this.kernel.signalIsFormed,
             values: [
-                this.output('macd', value.macd, input.index),
-                this.output('signal', value.signal, input.index),
-                this.output('histogram', value.histogram, input.index),
+                this.formedOutput('macd', value.macd, this.kernel.macdIsFormed, input.index),
+                this.formedOutput('signal', value.signal, this.kernel.signalIsFormed, input.index),
+                this.formedOutput('histogram', value.histogram, this.kernel.signalIsFormed, input.index),
             ],
         };
     }
@@ -79,11 +79,13 @@ export const MacdHistogramIndicator: IndicatorDefinition<
     parameters: [
         {
             id: 'shortMaLength', name: 'Fast Length', type: IndicatorParameterType.Integer,
-            defaultValue: 12, min: 2, max: 200, step: 1,
+            defaultValue: 12, min: 1, max: 200, step: 1,
+            aliases: ['macdShortMaLength'],
         },
         {
             id: 'longMaLength', name: 'Slow Length', type: IndicatorParameterType.Integer,
-            defaultValue: 26, min: 2, max: 400, step: 1,
+            defaultValue: 26, min: 1, max: 400, step: 1,
+            aliases: ['macdLongMaLength'],
         },
         {
             id: 'signalMaLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
@@ -100,8 +102,8 @@ export const MacdHistogramIndicator: IndicatorDefinition<
     aliases: ['macdhistogram'],
     painter: 'macd-histogram',
     processorFactory: (parameters) => new MacdHistogramProcessor(
-        integer(parameters?.shortMaLength, 12, 2, 200, 'shortMaLength'),
-        integer(parameters?.longMaLength, 26, 2, 400, 'longMaLength'),
+        integer(parameters?.shortMaLength, 12, 1, 200, 'shortMaLength'),
+        integer(parameters?.longMaLength, 26, 1, 400, 'longMaLength'),
         integer(parameters?.signalMaLength, 9, 1, 100, 'signalMaLength'),
     ),
 });

@@ -79,13 +79,14 @@ export class RainbowChartsProcessor extends SequentialIndicatorProcessor<
         commit: boolean,
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
-        const values = this.averages.map((average, index) => this.output(
+        const values = this.averages.map((average, index) => this.formedOutput(
             `sma${index + 1}`,
             commit ? average.push(close) : average.preview(close),
+            average.isFormed,
             input.index,
         ));
         return {
-            isFormed: values[values.length - 1].value !== null,
+            isFormed: this.averages[this.averages.length - 1].isFormed,
             values,
         };
     }

@@ -63,7 +63,7 @@ export class McClellanOscillatorProcessor extends SequentialIndicatorProcessor<
         const long = commit ? this.long.push(close) : this.long.preview(close);
         const value = short === null || long === null ? null : finite(short - long);
         return {
-            isFormed: value !== null,
+            isFormed: this.short.isFormed && this.long.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

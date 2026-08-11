@@ -65,7 +65,7 @@ export class ElliotWaveOscillatorProcessor extends SequentialIndicatorProcessor<
         const long = commit ? this.long.push(value) : this.long.preview(value);
         const oscillator = short === null || long === null ? null : short - long;
         return {
-            isFormed: oscillator !== null,
+            isFormed: this.short.isFormed && this.long.isFormed,
             values: [this.output('line', oscillator, input.index)],
         };
     }

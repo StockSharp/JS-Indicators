@@ -62,7 +62,7 @@ export class PercentagePriceOscillatorProcessor extends SequentialIndicatorProce
             ? null
             : (long === 0 ? 0 : finite((short - long) / long * 100));
         return {
-            isFormed: ppo !== null,
+            isFormed: this.short.isFormed && this.long.isFormed,
             values: [this.output('ppo', ppo, input.index)],
         };
     }

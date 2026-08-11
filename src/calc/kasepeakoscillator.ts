@@ -32,7 +32,6 @@ import {
 } from './shared/guards.js';
 
 export interface KasePeakOscillatorParameters extends IndicatorParameters {
-    readonly shortTermLength: number;
     readonly shortPeriod: number;
     readonly longPeriod: number;
 }
@@ -54,15 +53,13 @@ export class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<
     private previousClose = 0;
 
     constructor(
-        readonly shortTermLength: number,
         readonly shortPeriod: number,
         readonly longPeriod: number,
     ) {
         super(['shortTerm', 'longTerm']);
-        integer(shortTermLength, shortTermLength, 1, 500, 'shortTermLength');
         integer(shortPeriod, shortPeriod, 1, 500, 'shortPeriod');
         integer(longPeriod, longPeriod, 1, 500, 'longPeriod');
-        this.averageTrueRange = new ExpandingAverageTrueRange(shortTermLength);
+        this.averageTrueRange = new ExpandingAverageTrueRange(10);
     }
 
     protected calculate(
@@ -72,7 +69,7 @@ export class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<
         const averageTrueRange = commit
             ? this.averageTrueRange.push(input.value)
             : this.averageTrueRange.preview(input.value);
-        const atrFormedFrom = this.shortTermLength - 1;
+        const atrFormedFrom = 9;
         const shortFormedAt = atrFormedFrom + this.shortPeriod - 1;
         const longFormedAt = atrFormedFrom + this.longPeriod - 1;
         const high = finite(input.value?.high);
@@ -119,8 +116,8 @@ export class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<
         return {
             isFormed: longFormed,
             values: [
-                this.output('shortTerm', shortFormed ? shortValue : null, input.index),
-                this.output('longTerm', longFormed ? longValue : null, input.index),
+                this.formedOutput('shortTerm', shortValue, shortFormed, input.index),
+                this.formedOutput('longTerm', longValue, longFormed, input.index),
             ],
         };
     }
@@ -187,10 +184,6 @@ export const KasePeakOscillatorIndicator: IndicatorDefinition<
     input: CandlestickIndicatorInput,
     parameters: [
         {
-            id: 'shortTermLength', name: 'ATR Length', type: IndicatorParameterType.Integer,
-            defaultValue: 9, min: 1, max: 500, step: 1,
-        },
-        {
             id: 'shortPeriod', name: 'Short Period', type: IndicatorParameterType.Integer,
             defaultValue: 9, min: 1, max: 500, step: 1,
         },
@@ -213,7 +206,6 @@ export const KasePeakOscillatorIndicator: IndicatorDefinition<
     measure: IndicatorMeasure.Percent,
     aliases: ['kpo'],
     processorFactory: (parameters) => new KasePeakOscillatorProcessor(
-        integer(parameters?.shortTermLength, 9, 1, 500, 'shortTermLength'),
         integer(parameters?.shortPeriod, 9, 1, 500, 'shortPeriod'),
         integer(parameters?.longPeriod, 18, 1, 500, 'longPeriod'),
     ),

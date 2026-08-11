@@ -15,6 +15,7 @@ import {
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
 import { CommodityChannelIndexKernel } from '../math/commodity-channel-index.js';
+import { RingBuffer, type RingBufferCheckpoint } from '../math/index.js';
 import {
     CompoundLengthParameters,
     FiniteExponentialAverage,
@@ -31,7 +32,11 @@ export interface TrixCheckpoint {
     readonly first: FiniteExponentialCheckpoint;
     readonly second: FiniteExponentialCheckpoint;
     readonly third: FiniteExponentialCheckpoint;
-    readonly previous: number | null;
+    readonly rateOfChange: RingBufferCheckpoint<number>;
+}
+
+export interface TrixParameters extends CompoundLengthParameters {
+    readonly rocLength: number;
 }
 
 export class TrixProcessor extends SequentialIndicatorProcessor<
@@ -41,13 +46,15 @@ export class TrixProcessor extends SequentialIndicatorProcessor<
     private readonly first: FiniteExponentialAverage;
     private readonly second: FiniteExponentialAverage;
     private readonly third: FiniteExponentialAverage;
-    private previous: number | null = null;
+    private readonly rateOfChange: RingBuffer<number>;
 
-    constructor(readonly length: number) {
+    constructor(readonly length: number, readonly rocLength: number) {
         super(['line']);
+        integer(rocLength, rocLength, 1, 500, 'rocLength');
         this.first = new FiniteExponentialAverage(length);
         this.second = new FiniteExponentialAverage(length);
         this.third = new FiniteExponentialAverage(length);
+        this.rateOfChange = new RingBuffer(rocLength + 1);
     }
 
     protected calculate(
@@ -56,20 +63,28 @@ export class TrixProcessor extends SequentialIndicatorProcessor<
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const first = commit ? this.first.push(close) : this.first.preview(close);
-        const second = commit ? this.second.push(first) : this.second.preview(first);
-        const third = commit ? this.third.push(second) : this.third.preview(second);
+        const secondInput = this.first.isFormed ? first : null;
+        const second = commit
+            ? this.second.push(secondInput)
+            : this.second.preview(secondInput);
+        const thirdInput = this.second.isFormed ? second : null;
+        const third = commit
+            ? this.third.push(thirdInput)
+            : this.third.preview(thirdInput);
 
-        let value: number | null = null;
-        if (third === null) {
-            if (commit) this.previous = null;
-        } else if (this.previous === null || this.previous === 0) {
-            if (commit) this.previous = third;
-        } else {
-            value = 1_000 * (third - this.previous) / this.previous;
-            if (commit) this.previous = third;
+        const history = [...this.rateOfChange.checkpoint().values];
+        if (third !== null && this.third.isFormed) {
+            if (history.length >= this.rocLength + 1) history.shift();
+            history.push(third);
+            if (commit) this.rateOfChange.push(third);
         }
+        const formed = history.length > this.rocLength;
+        const reference = history[0];
+        const value = formed && third !== null && reference !== 0
+            ? 1_000 * (third - reference) / reference
+            : null;
         return {
-            isFormed: value !== null,
+            isFormed: formed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -78,47 +93,56 @@ export class TrixProcessor extends SequentialIndicatorProcessor<
         this.first.reset();
         this.second.reset();
         this.third.reset();
-        this.previous = null;
+        this.rateOfChange.clear();
     }
     protected captureState(): TrixCheckpoint {
         return Object.freeze({
             first: this.first.checkpoint(),
             second: this.second.checkpoint(),
             third: this.third.checkpoint(),
-            previous: this.previous,
+            rateOfChange: this.rateOfChange.checkpoint(),
         });
     }
     protected restoreState(state: TrixCheckpoint): void {
         if (state === null || typeof state !== 'object'
-            || (state.previous !== null && finite(state.previous) === null)) {
+            || !Array.isArray(state.rateOfChange?.values)
+            || state.rateOfChange.values.length > this.rocLength + 1
+            || state.rateOfChange.values.some((value) => finite(value) === null)) {
             throw new TypeError('sschart: invalid Trix checkpoint');
         }
         this.first.restore(state.first);
         this.second.restore(state.second);
         this.third.restore(state.third);
-        this.previous = state.previous;
+        this.rateOfChange.restore(state.rateOfChange);
     }
 }
 
 export const TrixIndicator: IndicatorDefinition<
     IndicatorCandle,
-    CompoundLengthParameters
+    TrixParameters
 > = registerIndicator({
     id: 'Trix',
     name: 'Trix',
     description: 'StockSharp-scaled one-bar rate of change of a triple-smoothed EMA.',
     category: IndicatorCategory.Momentum,
     input: CandlestickIndicatorInput,
-    parameters: [{
-        id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
-        defaultValue: 32, min: 1, max: 500, step: 1,
-    }],
+    parameters: [
+        {
+            id: 'length', name: 'Length', type: IndicatorParameterType.Integer,
+            defaultValue: 32, min: 1, max: 500, step: 1,
+        },
+        {
+            id: 'rocLength', name: 'ROC Length', type: IndicatorParameterType.Integer,
+            defaultValue: 1, min: 1, max: 500, step: 1,
+        },
+    ],
     outputs: [{ id: 'line', name: 'Trix', defaultStyle: style(IndicatorSeriesStyle.Line, '#ab47bc', 2) }],
     naturalPane: IndicatorPane.Separate,
     measure: IndicatorMeasure.MinusOnePlusOne,
     aliases: ['trix'],
     levels: [0],
     processorFactory: (parameters) => new TrixProcessor(
-        integer(parameters?.length, 14, 1, 500, 'length'),
+        integer(parameters?.length, 32, 1, 500, 'length'),
+        integer(parameters?.rocLength, 1, 1, 500, 'rocLength'),
     ),
 });

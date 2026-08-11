@@ -66,7 +66,7 @@ export class RangeActionVerificationIndexProcessor extends SequentialIndicatorPr
             ? null
             : finite(Math.abs(100 * (short - long) / long));
         return {
-            isFormed: value !== null,
+            isFormed: this.longAverage.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

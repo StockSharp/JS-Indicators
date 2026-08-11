@@ -182,6 +182,8 @@ describe('indicator catalog parity with StockSharp', () => {
         // same picture -- so there is nothing here to record, only to fix.
         assert.deepEqual(paneDiffs, [],
             `${paneDiffs.length} indicators sit on a different pane than StockSharp: ` + paneDiffs.join(', '));
+        assert.deepEqual(countDiffs, [],
+            `${countDiffs.length} indicators expose a different number of parameters than StockSharp: ` + countDiffs.join(', '));
         assert.deepEqual(nameDiffs, [],
             `${nameDiffs.length} indicators name their parameters differently than StockSharp:` + NEWLINE
             + nameDiffs.join(NEWLINE));

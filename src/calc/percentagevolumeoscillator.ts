@@ -62,11 +62,11 @@ export class PercentageVolumeOscillatorProcessor extends SequentialIndicatorProc
             ? null
             : (long === 0 ? 0 : finite((short - long) / long * 100));
         return {
-            isFormed: pvo !== null,
+            isFormed: this.short.isFormed && this.long.isFormed,
             values: [
-                this.output('shortEma', short, input.index),
-                this.output('longEma', long, input.index),
-                this.output('pvo', pvo, input.index),
+                this.formedOutput('shortEma', short, this.short.isFormed, input.index),
+                this.formedOutput('longEma', long, this.long.isFormed, input.index),
+                this.formedOutput('pvo', pvo, this.short.isFormed && this.long.isFormed, input.index),
             ],
         };
     }

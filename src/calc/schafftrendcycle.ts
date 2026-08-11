@@ -109,7 +109,8 @@ export class SchaffTrendCycleProcessor extends SequentialIndicatorProcessor<
         }
 
         const macd = commit ? this.macd.push(close) : this.macd.preview(close);
-        if (macd.histogram === null || closeHigh === null || closeLow === null) {
+        if (!this.macd.signalIsFormed
+            || macd.histogram === null || closeHigh === null || closeLow === null) {
             return {
                 isFormed: false,
                 values: [this.output('line', null, input.index)],
@@ -171,7 +172,9 @@ export class SchaffTrendCycleProcessor extends SequentialIndicatorProcessor<
             ? this.average.push(stochastic)
             : this.average.preview(stochastic);
         return {
-            isFormed: value !== null,
+            isFormed: this.macd.signalIsFormed
+                && stochasticFormed
+                && this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }
@@ -230,10 +233,12 @@ export const SchaffTrendCycleIndicator: IndicatorDefinition<
         {
             id: 'shortMaLength', name: 'Short Length', type: IndicatorParameterType.Integer,
             defaultValue: 23, min: 1, max: 500, step: 1,
+            aliases: ['macdMacdShortMaLength'],
         },
         {
             id: 'longMaLength', name: 'Long Length', type: IndicatorParameterType.Integer,
             defaultValue: 50, min: 1, max: 500, step: 1,
+            aliases: ['macdMacdLongMaLength'],
         },
         {
             id: 'stochasticKLength', name: 'Cycle Length', type: IndicatorParameterType.Integer,
@@ -242,6 +247,7 @@ export const SchaffTrendCycleIndicator: IndicatorDefinition<
         {
             id: 'signalMaLength', name: 'Signal Length', type: IndicatorParameterType.Integer,
             defaultValue: 3, min: 1, max: 500, step: 1,
+            aliases: ['macdSignalMaLength'],
         },
     ],
     outputs: [{

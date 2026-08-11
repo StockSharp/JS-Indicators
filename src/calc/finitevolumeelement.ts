@@ -60,7 +60,7 @@ export class FiniteVolumeElementProcessor extends SequentialIndicatorProcessor<
         const average = commit ? this.average.push(raw) : this.average.preview(raw);
         const value = average === null ? null : finite(average * 100);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

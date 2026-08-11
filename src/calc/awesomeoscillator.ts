@@ -67,7 +67,7 @@ export class AwesomeOscillatorProcessor extends SequentialIndicatorProcessor<
         const up = value === null || this.previous === null ? true : value >= this.previous;
         if (commit && value !== null) this.previous = value;
         return {
-            isFormed: value !== null,
+            isFormed: this.long.isFormed,
             values: [this.output('value', value, input.index, { up })],
         };
     }

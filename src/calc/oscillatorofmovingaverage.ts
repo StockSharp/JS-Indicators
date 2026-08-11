@@ -66,7 +66,7 @@ export class OscillatorOfMovingAverageProcessor extends SequentialIndicatorProce
             ? null
             : long === 0 ? 0 : finite((short - long) / long * 100);
         return {
-            isFormed: value !== null,
+            isFormed: this.shortAverage.isFormed && this.longAverage.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

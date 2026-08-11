@@ -111,9 +111,10 @@ export class ParabolicSarProcessor extends SequentialIndicatorProcessor<
         }
         const result = this.evaluate({ high, low });
         if (commit) this.state = result.state;
+        const value = result.value === 0 ? null : result.value;
         return {
-            isFormed: result.value !== null,
-            values: [this.output('value', result.value, input.index)],
+            isFormed: true,
+            values: [this.output('value', value, input.index)],
         };
     }
 

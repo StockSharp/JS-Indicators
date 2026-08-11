@@ -43,7 +43,7 @@ export class ExponentialMovingAverageProcessor extends SequentialIndicatorProces
             ? this.average.push(close(input))
             : this.average.preview(close(input));
         return {
-            isFormed: this.average.isFormed || value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -50,10 +50,11 @@ export class ForecastOscillatorProcessor extends SequentialIndicatorProcessor<
         const forecast = commit
             ? this.regression.push(price)
             : this.regression.preview(price);
-        const candidate = this.length > 1 && price !== null && price !== 0
-            && forecast !== null
-            ? ((price - forecast) / price) * 100
-            : null;
+        const candidate = this.length === 1 && price !== null
+            ? 0
+            : price !== null && price !== 0 && forecast !== null
+                ? ((price - forecast) / price) * 100
+                : null;
         const value = finite(candidate);
         return {
             isFormed: value !== null,

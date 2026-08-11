@@ -94,7 +94,7 @@ export class MassIndexProcessor extends SequentialIndicatorProcessor<
             }
         }
 
-        let value = this.ratios.full ? this.ratioSum : null;
+        let value: number | null = null;
         if (ratio !== null) {
             const outgoing = this.ratios.full ? (this.ratios.front() as number) : 0;
             const nextSum = this.ratioSum - outgoing + ratio;

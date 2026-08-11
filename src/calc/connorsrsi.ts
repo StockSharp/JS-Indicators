@@ -37,6 +37,7 @@ export interface ConnorsRsiParameters extends IndicatorParameters {
 export interface ArrayRsiCheckpoint {
     readonly initialized: boolean;
     readonly previous: number | null;
+    readonly previousResult: number | null;
     readonly gain: SmoothedMovingAverageCheckpoint;
     readonly loss: SmoothedMovingAverageCheckpoint;
 }
@@ -44,6 +45,7 @@ export interface ArrayRsiCheckpoint {
 export class ArrayRsiKernel {
     private initialized = false;
     private previous: number | null = null;
+    private previousResult: number | null = null;
     private readonly gain: SmoothedMovingAverage;
     private readonly loss: SmoothedMovingAverage;
 
@@ -58,6 +60,7 @@ export class ArrayRsiKernel {
     reset(): void {
         this.initialized = false;
         this.previous = null;
+        this.previousResult = null;
         this.gain.reset();
         this.loss.reset();
     }
@@ -66,6 +69,7 @@ export class ArrayRsiKernel {
         return Object.freeze({
             initialized: this.initialized,
             previous: this.previous,
+            previousResult: this.previousResult,
             gain: this.gain.checkpoint(),
             loss: this.loss.checkpoint(),
         });
@@ -75,6 +79,7 @@ export class ArrayRsiKernel {
         if (state === null || typeof state !== 'object'
             || typeof state.initialized !== 'boolean'
             || (state.previous !== null && finite(state.previous) === null)
+            || (state.previousResult !== null && finite(state.previousResult) === null)
             || state.gain?.count !== state.loss?.count
             || (!state.initialized && (state.previous !== null || state.gain.count !== 0))) {
             throw new TypeError('sschart: invalid array RSI checkpoint');
@@ -83,6 +88,7 @@ export class ArrayRsiKernel {
         this.loss.restore(state.loss);
         this.initialized = state.initialized;
         this.previous = state.previous;
+        this.previousResult = state.previousResult;
     }
 
     private evaluate(value: number | null, commit: boolean): number | null {
@@ -106,7 +112,15 @@ export class ArrayRsiKernel {
         if (commit) this.previous = value;
         if (gain === null || loss === null) return null;
         const total = gain + loss;
-        return total === 0 ? 50 : finite(100 * gain / total);
+        if (delta === 0 && this.previousResult !== null) return this.previousResult;
+        if (total === 0) return this.previousResult ?? 50;
+        const result = finite(loss === 0
+            ? 100
+            : gain === 0
+                ? 0
+                : Math.max(0, Math.min(100, 100 * gain / total)));
+        if (commit) this.previousResult = result;
+        return result;
     }
 }
 
@@ -269,8 +283,17 @@ export const ConnorsRsiIndicator: IndicatorDefinition<
     scaleRange: { min: 0, max: 100 },
     levels: [10, 90],
     processorFactory: (parameters) => new ConnorsRsiProcessor(
-        resolvedPeriod(parameters?.rsiPeriod, 3, 'rsiPeriod'),
+        resolvedPeriod(
+            parameters?.rsiPeriod ?? parameters?.rSIPeriod ?? parameters?.rsiperiod,
+            3,
+            'rsiPeriod',
+        ),
         resolvedPeriod(parameters?.streakRSIPeriod, 2, 'streakRSIPeriod'),
-        resolvedPeriod(parameters?.rocRSIPeriod, 100, 'rocRSIPeriod', 1_000),
+        resolvedPeriod(
+            parameters?.rocRSIPeriod ?? parameters?.rOCRSIPeriod ?? parameters?.rocrsiperiod,
+            100,
+            'rocRSIPeriod',
+            1_000,
+        ),
     ),
 });

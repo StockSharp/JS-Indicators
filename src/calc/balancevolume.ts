@@ -42,9 +42,9 @@ export class BalanceVolumeProcessor extends SequentialIndicatorProcessor<
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const volume = finite(input.value?.volume);
-        if (!this.seeded) {
+        if (this.previousClose === 0) {
             if (commit && close !== null) {
-                this.seeded = true;
+                this.seeded = close !== 0;
                 this.previousClose = close;
             }
             return {

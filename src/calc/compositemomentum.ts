@@ -111,8 +111,11 @@ export class CompositeMomentumProcessor extends SequentialIndicatorProcessor<
         const fast = commit ? this.fast.push(close) : this.fast.preview(close);
         const slow = commit ? this.slow.push(close) : this.slow.preview(close);
 
+        const inputsFormed = this.shortRoc.size > this.shortRocLength
+            && this.longRoc.size > this.longRocLength
+            && this.rsi.isFormed && this.fast.isFormed && this.slow.isFormed;
         let composite: number | null = null;
-        if (shortRoc !== null && longRoc !== null && rsi !== null
+        if (inputsFormed && shortRoc !== null && longRoc !== null && rsi !== null
             && fast !== null && slow !== null) {
             const normalizedShort = shortRoc / 100;
             const normalizedLong = longRoc / 100;
@@ -129,8 +132,8 @@ export class CompositeMomentumProcessor extends SequentialIndicatorProcessor<
         return {
             isFormed: composite !== null && sma !== null,
             values: [
-                this.output('composite', composite, input.index),
-                this.output('sma', sma, input.index),
+                this.formedOutput('composite', composite, composite !== null, input.index),
+                this.formedOutput('sma', sma, this.average.isFormed, input.index),
             ],
         };
     }

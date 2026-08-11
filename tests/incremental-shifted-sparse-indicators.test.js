@@ -33,18 +33,17 @@ function input(bar) {
 }
 
 function oracle(source, params, outputId) {
-    return bulkOracle(IchimokuIndicator, source, params, outputId)
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
-        .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
+    return bulkOracleWithTargets(IchimokuIndicator, source, params, outputId);
 }
 
 function assertOutput(runtime, outputId, expected, epsilon = 1e-9) {
-    const actual = runtime.points(outputId).filter((point) => point.time !== null);
+    const actual = runtime.points(outputId);
     assert.equal(actual.length, expected.length, `${outputId} point count`);
     actual.forEach((point, index) => {
         const value = expected[index];
         assert.equal(point.outputId, outputId);
-        assert.equal(point.targetIndex, value.index);
+        assert.equal(point.sourceIndex, value.sourceIndex);
+        assert.equal(point.targetIndex, value.targetIndex);
         assert.equal(point.time, value.time);
         const tolerance = Math.max(1, Math.abs(value.value)) * epsilon;
         assert.ok(
@@ -137,13 +136,13 @@ function alligatorShift(outputId, params = ALLIGATOR_PARAMS) {
     return params[`${outputId}Shift`];
 }
 
-function alligatorOracle(source, params, outputId, shift) {
+function alligatorOracle(source, params, outputId) {
     return bulkOracleWithTargets(AlligatorIndicator, source, params, outputId);
 }
 
 function assertAlligator(runtime, source, params = ALLIGATOR_PARAMS) {
     for (const outputId of ['jaw', 'teeth', 'lips']) {
-        const expected = alligatorOracle(source, outputId, params);
+        const expected = alligatorOracle(source, params, outputId);
         const actual = runtime.points(outputId);
         assert.equal(actual.length, expected.length, `${outputId} point count`);
         actual.forEach((point, index) => {
@@ -167,11 +166,8 @@ const GATOR_PARAMS = {
 };
 
 function assertGator(runtime, source, params = GATOR_PARAMS) {
-    const expected = bulkOracle(GatorOscillatorIndicator, source, params);
     for (const outputId of ['upper', 'lower']) {
-        const oracle = expected[outputId]
-            .map((point, index) => ({ index, time: point.time, value: point.value }))
-            .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
+        const oracle = bulkOracle(GatorOscillatorIndicator, source, params, outputId);
         const actual = runtime.points(outputId);
         assert.equal(actual.length, oracle.length, `${outputId} point count`);
         actual.forEach((point, index) => {
@@ -294,8 +290,8 @@ describe('incremental shifted and sparse indicators', () => {
 
         assert.deepEqual(runtime.points('value'), [
             {
-                outputId: 'value', sourceIndex: 5, targetIndex: 2,
-                time: source[2].time, value: 13,
+                outputId: 'value', sourceIndex: 5, targetIndex: 1,
+                time: source[1].time, value: 13,
             },
             {
                 outputId: 'value', sourceIndex: 10, targetIndex: 5,

@@ -48,13 +48,15 @@ export class RelativeVigorIndexProcessor extends SequentialIndicatorProcessor<
     IndicatorCandle,
     RelativeVigorIndexCheckpoint
 > {
-    private readonly samples = new RingBuffer<RelativeVigorSample | null>(4);
-    private readonly values = new RingBuffer<number | null>(4);
+    private readonly samples: RingBuffer<RelativeVigorSample | null>;
+    private readonly values: RingBuffer<number | null>;
 
     constructor(readonly averageLength: number, readonly signalLength: number) {
         super(['rvi', 'signal']);
         integer(averageLength, averageLength, 4, 200, 'averageLength');
         integer(signalLength, signalLength, 4, 100, 'signalLength');
+        this.samples = new RingBuffer<RelativeVigorSample | null>(averageLength);
+        this.values = new RingBuffer<number | null>(signalLength);
     }
 
     protected calculate(
@@ -70,19 +72,22 @@ export class RelativeVigorIndexProcessor extends SequentialIndicatorProcessor<
         const sample = numerator === null || denominator === null
             ? null
             : Object.freeze({ numerator, denominator });
-        const rvi = input.index < this.averageLength - 1 ? null : this.weightedSample(sample);
-        const signal = input.index < this.averageLength + this.signalLength - 2
-            ? null
-            : this.weightedValue(rvi);
-        if (commit) {
-            this.samples.push(sample);
-            this.values.push(rvi);
-        }
+        if (commit) this.samples.push(sample);
+        const rviFormed = this.samples.size >= this.averageLength;
+        const rvi = rviFormed ? this.weightedSample(sample, commit) : null;
+
+        // RelativeVigorIndex is a sequence-mode complex indicator: its signal
+        // buffer starts only after the average line has formed.
+        if (commit && rviFormed) this.values.push(rvi);
+        const signalFormed = this.values.size >= this.signalLength;
+        const signal = rviFormed && signalFormed
+            ? this.weightedValue(rvi, commit)
+            : null;
         return {
-            isFormed: rvi !== null,
+            isFormed: signalFormed,
             values: [
-                this.output('rvi', rvi, input.index),
-                this.output('signal', signal, input.index),
+                this.formedOutput('rvi', rvi, rviFormed, input.index),
+                this.formedOutput('signal', signal, signalFormed, input.index),
             ],
         };
     }
@@ -103,12 +108,12 @@ export class RelativeVigorIndexProcessor extends SequentialIndicatorProcessor<
         const samples = state?.samples?.values;
         const values = state?.values?.values;
         if (state === null || typeof state !== 'object'
-            || !Array.isArray(samples) || samples.length > 4
+            || !Array.isArray(samples) || samples.length > this.averageLength
             || samples.some((sample) => sample !== null && (
                 typeof sample !== 'object'
                 || finite(sample.numerator) === null || finite(sample.denominator) === null
             ))
-            || !Array.isArray(values) || values.length > 4
+            || !Array.isArray(values) || values.length > this.signalLength
             || values.some((value) => value !== null && finite(value) === null)) {
             throw new TypeError('sschart: invalid Relative Vigor Index checkpoint');
         }
@@ -116,32 +121,35 @@ export class RelativeVigorIndexProcessor extends SequentialIndicatorProcessor<
         this.values.restore(state.values);
     }
 
-    private weightedSample(incoming: RelativeVigorSample | null): number | null {
-        if (incoming === null || this.samples.size < 3) return null;
-        const start = this.samples.size - 3;
-        const first = this.samples.at(start);
-        const second = this.samples.at(start + 1);
-        const third = this.samples.at(start + 2);
+    private weightedSample(
+        incoming: RelativeVigorSample | null,
+        commit: boolean,
+    ): number | null {
+        const first = this.samples.at(commit ? 0 : 1);
+        const second = this.samples.at(commit ? 1 : 2);
+        const third = this.samples.at(commit ? 2 : 3);
+        const fourth = commit ? this.samples.at(3) : incoming;
         if (first === null || first === undefined
             || second === null || second === undefined
-            || third === null || third === undefined) return null;
+            || third === null || third === undefined
+            || fourth === null || fourth === undefined) return null;
         const numerator = (first.numerator + 2 * second.numerator
-            + 2 * third.numerator + incoming.numerator) / 6;
+            + 2 * third.numerator + fourth.numerator) / 6;
         const denominator = (first.denominator + 2 * second.denominator
-            + 2 * third.denominator + incoming.denominator) / 6;
+            + 2 * third.denominator + fourth.denominator) / 6;
         return finite(denominator === 0 ? numerator : numerator / denominator);
     }
 
-    private weightedValue(incoming: number | null): number | null {
-        if (incoming === null || this.values.size < 3) return null;
-        const start = this.values.size - 3;
-        const first = this.values.at(start);
-        const second = this.values.at(start + 1);
-        const third = this.values.at(start + 2);
+    private weightedValue(incoming: number | null, commit: boolean): number | null {
+        const first = this.values.at(commit ? 0 : 1);
+        const second = this.values.at(commit ? 1 : 2);
+        const third = this.values.at(commit ? 2 : 3);
+        const fourth = commit ? this.values.at(3) : incoming;
         if (first === null || first === undefined
             || second === null || second === undefined
-            || third === null || third === undefined) return null;
-        return finite((first + 2 * second + 2 * third + incoming) / 6);
+            || third === null || third === undefined
+            || fourth === null || fourth === undefined) return null;
+        return finite((first + 2 * second + 2 * third + fourth) / 6);
     }
 }
 

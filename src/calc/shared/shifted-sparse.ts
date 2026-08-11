@@ -160,17 +160,8 @@ export class ZigZagFamilyProcessor extends SequentialIndicatorProcessor<
             return { isFormed: false, values: [] };
         }
 
-        if (this.lastExtremum === null || this.isUpTrend === null) {
-            if (commit) {
-                this.lastExtremum = price;
-                this.isUpTrend = price >= this.previousPrice;
-                this.previousPrice = price;
-            }
-            return { isFormed: true, values: [] };
-        }
-
-        let lastExtremum = this.lastExtremum;
-        let isUpTrend = this.isUpTrend;
+        let lastExtremum = this.lastExtremum ?? price;
+        let isUpTrend = this.isUpTrend ?? (price >= this.previousPrice);
         let shift = this.shift;
         let changed = false;
         const threshold = lastExtremum * this.deviation;
@@ -185,8 +176,11 @@ export class ZigZagFamilyProcessor extends SequentialIndicatorProcessor<
         const accepted = changed && (this.direction === 'both'
             || (this.direction === 'up' && isUpTrend)
             || (this.direction === 'down' && !isUpTrend));
+        const targetIndex = this.direction === 'both' && lastExtremum === 0
+            ? input.index
+            : input.index - shift;
         const values = accepted
-            ? [this.output('value', lastExtremum, input.index - shift)]
+            ? [this.output('value', lastExtremum, targetIndex)]
             : [];
         if (changed) {
             isUpTrend = !isUpTrend;

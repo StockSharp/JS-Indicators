@@ -94,7 +94,7 @@ export class DeMarkerProcessor extends SequentialIndicatorProcessor<
             ? null
             : denominator === 0 ? 0.5 : averageDeMax! / denominator;
         return {
-            isFormed: value !== null,
+            isFormed: this.deMax.isFormed && this.deMin.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

@@ -123,9 +123,9 @@ export class ConstanceBrownCompositeIndexProcessor extends SequentialIndicatorPr
         return {
             isFormed: composite !== null && fastSma !== null && slowSma !== null,
             values: [
-                this.output('composite', composite, input.index),
-                this.output('fastSma', fastSma, input.index),
-                this.output('slowSma', slowSma, input.index),
+                this.formedOutput('composite', composite, input.index >= this.combinedBar, input.index),
+                this.formedOutput('fastSma', fastSma, this.fastSma.isFormed, input.index),
+                this.formedOutput('slowSma', slowSma, this.slowSma.isFormed, input.index),
             ],
         };
     }

@@ -41,10 +41,10 @@ export class SineWaveProcessor extends SequentialIndicatorProcessor<IndicatorCan
         const sine = Math.sin(this.step * input.index);
         const leadSine = Math.sin(this.step * (input.index + 0.5));
         return {
-            isFormed: input.index >= this.length,
+            isFormed: input.index + 1 >= this.length,
             values: [
-                this.output('sine', sine, input.index),
-                this.output('leadsine', leadSine, input.index),
+                this.formedOutput('sine', sine, true, input.index),
+                this.formedOutput('leadsine', leadSine, true, input.index),
             ],
         };
     }

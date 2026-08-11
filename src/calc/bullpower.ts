@@ -47,7 +47,7 @@ export class BullPowerProcessor extends SequentialIndicatorProcessor<
         const average = commit ? this.average.push(close) : this.average.preview(close);
         const value = average === null || high === null ? null : high - average;
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

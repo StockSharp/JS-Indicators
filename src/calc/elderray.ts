@@ -49,10 +49,10 @@ export class ElderRayProcessor extends SequentialIndicatorProcessor<
         const bull = average === null || high === null ? null : finite(high - average);
         const bear = average === null || low === null ? null : finite(low - average);
         return {
-            isFormed: bull !== null && bear !== null,
+            isFormed: this.average.isFormed,
             values: [
-                this.output('bull', bull, input.index),
-                this.output('bear', bear, input.index),
+                this.formedOutput('bull', bull, this.average.isFormed, input.index),
+                this.formedOutput('bear', bear, this.average.isFormed, input.index),
             ],
         };
     }

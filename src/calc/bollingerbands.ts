@@ -33,6 +33,8 @@ import {
 export interface BollingerBandsParameters extends IndicatorParameters {
     readonly length: number;
     readonly width: number;
+    readonly upBandWidth: number;
+    readonly lowBandWidth: number;
 }
 
 export class BollingerBandsProcessor extends SequentialIndicatorProcessor<
@@ -42,11 +44,18 @@ export class BollingerBandsProcessor extends SequentialIndicatorProcessor<
     private readonly average: SimpleMovingAverage;
     private readonly deviation: RollingStandardDeviation;
 
-    constructor(readonly length: number, readonly multiplier: number) {
+    constructor(
+        readonly length: number,
+        readonly width: number,
+        readonly upBandWidth: number,
+        readonly lowBandWidth: number,
+    ) {
         super(['upper', 'middle', 'lower']);
         this.average = new SimpleMovingAverage(length);
         this.deviation = new RollingStandardDeviation(length);
-        number(multiplier, 2, 0, 100, 'width');
+        number(width, 2, 0, 100, 'width');
+        number(upBandWidth, 2, -100, 100, 'upBandWidth');
+        number(lowBandWidth, -2, -100, 100, 'lowBandWidth');
     }
 
     protected calculate(
@@ -57,12 +66,15 @@ export class BollingerBandsProcessor extends SequentialIndicatorProcessor<
         const middle = commit ? this.average.push(close) : this.average.preview(close);
         const deviation = commit ? this.deviation.push(close) : this.deviation.preview(close);
         const formed = middle !== null && deviation !== null;
+        const symmetricOverride = this.width !== 2;
+        const upperWidth = symmetricOverride ? this.width : this.upBandWidth;
+        const lowerWidth = symmetricOverride ? -this.width : this.lowBandWidth;
         return {
-            isFormed: formed,
+            isFormed: this.average.isFormed,
             values: [
-                this.output('upper', formed ? middle + this.multiplier * deviation : null, input.index),
-                this.output('middle', formed ? middle : null, input.index),
-                this.output('lower', formed ? middle - this.multiplier * deviation : null, input.index),
+                this.formedOutput('upper', formed ? middle + upperWidth * deviation : null, formed, input.index),
+                this.formedOutput('middle', middle, this.average.isFormed, input.index),
+                this.formedOutput('lower', formed ? middle + lowerWidth * deviation : null, formed, input.index),
             ],
         };
     }
@@ -105,6 +117,14 @@ export const BollingerBandsIndicator: IndicatorDefinition<
             id: 'width', name: 'Deviation', type: IndicatorParameterType.Number,
             defaultValue: 2, min: 0.1, max: 5, step: 0.1,
         },
+        {
+            id: 'upBandWidth', name: 'Upper Band Width', type: IndicatorParameterType.Number,
+            defaultValue: 2, min: -5, max: 5, step: 0.1,
+        },
+        {
+            id: 'lowBandWidth', name: 'Lower Band Width', type: IndicatorParameterType.Number,
+            defaultValue: -2, min: -5, max: 5, step: 0.1,
+        },
     ],
     outputs: [
         { id: 'upper', name: 'Upper', defaultStyle: style(IndicatorSeriesStyle.Band, '#42a5f5') },
@@ -116,7 +136,9 @@ export const BollingerBandsIndicator: IndicatorDefinition<
     aliases: ['bb'],
     painter: 'band',
     processorFactory: (parameters) => new BollingerBandsProcessor(
-        integer(parameters?.length, 20, 1, 500, 'length'),
+        integer(parameters?.length, 32, 1, 500, 'length'),
         number(parameters?.width, 2, 0.1, 5, 'width'),
+        number(parameters?.upBandWidth, 2, -5, 5, 'upBandWidth'),
+        number(parameters?.lowBandWidth, -2, -5, 5, 'lowBandWidth'),
     ),
 });

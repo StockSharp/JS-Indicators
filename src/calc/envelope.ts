@@ -53,11 +53,11 @@ export class EnvelopeProcessor extends SequentialIndicatorProcessor<
         const close = finite(input.value?.close);
         const middle = commit ? this.average.push(close) : this.average.preview(close);
         return {
-            isFormed: middle !== null,
+            isFormed: this.average.isFormed,
             values: [
-                this.output('upper', middle === null ? null : middle * (1 + this.shift), input.index),
-                this.output('middle', middle, input.index),
-                this.output('lower', middle === null ? null : middle * (1 - this.shift), input.index),
+                this.formedOutput('upper', middle === null ? null : middle * (1 + this.shift), this.average.isFormed, input.index),
+                this.formedOutput('middle', middle, this.average.isFormed, input.index),
+                this.formedOutput('lower', middle === null ? null : middle * (1 - this.shift), this.average.isFormed, input.index),
             ],
         };
     }

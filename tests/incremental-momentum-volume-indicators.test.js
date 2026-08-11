@@ -77,7 +77,7 @@ describe('incremental momentum and volume indicators', () => {
         assert.equal(processor.position, 0);
         assert.equal(process(0, true).values[0].value, null);
         assert.equal(process(1, true).values[0].value, null);
-        assert.equal(process(2, false).values[0].value, 0.5);
+        assert.equal(process(2, false).values[0].value, null);
         assert.equal(processor.position, 2);
         assert.equal(process(2, true).values[0].value, 0.5);
     });
@@ -120,7 +120,9 @@ describe('incremental momentum and volume indicators', () => {
             value: bar,
             isFinal: true,
         }).values[0].value);
-        const expected = bulkOracle(DemandIndexIndicator, source, { length: 1 }, 'map')(point => point.value);
+        const expected = new Array(source.length).fill(null);
+        for (const point of bulkOracle(DemandIndexIndicator, source, { length: 1 }, 'line'))
+            expected[point.index] = point.value;
         actual.forEach((value, index) => {
             if (expected[index] === null) assert.equal(value, null);
             else assert.ok(Math.abs(value - expected[index]) <= Number.EPSILON * 2);

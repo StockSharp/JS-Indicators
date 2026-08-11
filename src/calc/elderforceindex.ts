@@ -64,7 +64,7 @@ export class ElderForceIndexProcessor extends SequentialIndicatorProcessor<
         if (commit) this.previousClose = close;
         const value = commit ? this.average.push(force) : this.average.preview(force);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

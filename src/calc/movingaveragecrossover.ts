@@ -65,7 +65,7 @@ export class MovingAverageCrossoverProcessor extends SequentialIndicatorProcesso
             ? null
             : (fast > slow ? 1 : (fast < slow ? -1 : 0));
         return {
-            isFormed: signal !== null,
+            isFormed: this.fast.isFormed && this.slow.isFormed,
             values: [this.output('signal', signal, input.index)],
         };
     }

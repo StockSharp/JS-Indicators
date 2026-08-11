@@ -9,6 +9,7 @@ const {
     AverageTrueRange,
     ExpandingWilderMovingAverage,
     ExponentialMovingAverage,
+    FiniteExponentialAverage,
     FixedWeightedMovingAverage,
     LinearWeightedMovingAverage,
     PartialSeedSimpleMovingAverage,
@@ -109,12 +110,13 @@ describe('incremental indicator math kernel', () => {
         assert.equal(max.partialValue, null);
     });
 
-    it('implements classic SMA, EMA and Wilder seeds and compact checkpoints', () => {
+    it('keeps StockSharp warm-up values separate from the formed flag', () => {
         const sma = new SimpleMovingAverage(3);
-        assert.deepEqual([1, 2, 3, 4].map((value) => sma.push(value)), [null, null, 2, 3]);
+        assert.deepEqual([1, 2, 3, 4].map((value) => sma.push(value)), [1 / 3, 1, 2, 3]);
+        assert.equal(sma.isFormed, true);
 
         const ema = new ExponentialMovingAverage(3);
-        assert.deepEqual([1, 2, 3].map((value) => ema.push(value)), [null, null, 2]);
+        assert.deepEqual([1, 2, 3].map((value) => ema.push(value)), [1 / 3, 1, 2]);
         const checkpoint = ema.checkpoint();
         assert.equal(ema.preview(10), 6);
         assert.deepEqual(ema.checkpoint(), checkpoint);
@@ -122,6 +124,14 @@ describe('incremental indicator math kernel', () => {
         assert.equal(ema.push(4), 3);
         ema.restore(checkpoint);
         assert.equal(ema.push(4), 3);
+
+        const finite = new FiniteExponentialAverage(3);
+        assert.deepEqual([3, 6].map((value) => finite.push(value)), [1, 3]);
+        assert.equal(finite.isFormed, false);
+        assert.equal(finite.preview(9), 6);
+        assert.equal(finite.isFormed, false);
+        assert.equal(finite.push(9), 6);
+        assert.equal(finite.isFormed, true);
 
         const wilder = new WilderMovingAverage(3);
         assert.deepEqual([1, 2, 3].map((value) => wilder.push(value)), [null, null, 2]);
@@ -432,7 +442,8 @@ describe('incremental indicator math kernel', () => {
             if (!cs) { failures.push(`${kind}: absent from the dump`); continue; }
             const kernel = make(cs.params.Length);
             bars.forEach((bar, index) => {
-                const actual = kernel.push(feed(bar));
+                const warmupValue = kernel.push(feed(bar));
+                const actual = kernel.isFormed ? warmupValue : null;
                 const expected = cs.values[index];
                 if (expected === null || expected === undefined) {
                     if (actual !== null) failures.push(`${kind} bar ${index}: kernel ${actual}, platform none`);

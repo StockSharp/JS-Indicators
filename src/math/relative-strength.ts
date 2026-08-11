@@ -10,6 +10,7 @@ function finite(value: unknown): number | null {
 export interface PartialRelativeStrengthIndexCheckpoint {
     readonly initialized: boolean;
     readonly previous: number | null;
+    readonly previousResult: number | null;
     readonly gain: SmoothedMovingAverageCheckpoint;
     readonly loss: SmoothedMovingAverageCheckpoint;
 }
@@ -22,6 +23,7 @@ export interface PartialRelativeStrengthIndexCheckpoint {
 export class PartialRelativeStrengthIndex {
     private initialized = false;
     private previous: number | null = null;
+    private previousResult: number | null = null;
     private readonly gain: SmoothedMovingAverage;
     private readonly loss: SmoothedMovingAverage;
 
@@ -43,6 +45,7 @@ export class PartialRelativeStrengthIndex {
     reset(): void {
         this.initialized = false;
         this.previous = null;
+        this.previousResult = null;
         this.gain.reset();
         this.loss.reset();
     }
@@ -51,6 +54,7 @@ export class PartialRelativeStrengthIndex {
         return Object.freeze({
             initialized: this.initialized,
             previous: this.previous,
+            previousResult: this.previousResult,
             gain: this.gain.checkpoint(),
             loss: this.loss.checkpoint(),
         });
@@ -60,6 +64,7 @@ export class PartialRelativeStrengthIndex {
         if (state === null || typeof state !== 'object'
             || typeof state.initialized !== 'boolean'
             || (state.previous !== null && finite(state.previous) === null)
+            || (state.previousResult !== null && finite(state.previousResult) === null)
             || state.gain?.count !== state.loss?.count
             || (!state.initialized && (state.previous !== null || state.gain?.count !== 0))) {
             throw new TypeError('sschart: invalid partial RSI checkpoint');
@@ -72,6 +77,7 @@ export class PartialRelativeStrengthIndex {
         this.loss.restore(loss.checkpoint());
         this.initialized = state.initialized;
         this.previous = state.previous;
+        this.previousResult = state.previousResult;
     }
 
     private evaluate(value: number | null, commit: boolean): number | null {
@@ -95,6 +101,14 @@ export class PartialRelativeStrengthIndex {
         if (commit) this.previous = value;
         if (gain === null || loss === null) return null;
         const total = gain + loss;
-        return total === 0 ? 50 : finite(100 * gain / total);
+        if (delta === 0 && this.previousResult !== null) return this.previousResult;
+        if (total === 0) return this.previousResult ?? 50;
+        const result = finite(loss === 0
+            ? 100
+            : gain === 0
+                ? 0
+                : Math.max(0, Math.min(100, 100 * gain / total)));
+        if (commit) this.previousResult = result;
+        return result;
     }
 }

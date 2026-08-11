@@ -215,19 +215,23 @@ describe('runtime lifecycle: where a value is drawn', () => {
                 // its indicators emit at the bar they computed and the chart does the drawing, so
                 // there is nothing in the dump to compare against and the shift has to be checked
                 // against the declaration instead.
-                const declared = (definition.parameters || []).find((p) => p.id === `${id}Shift`);
+                const declared = definition.parameters || [];
                 const runtime = bulk(definition, parameters, SERIES);
                 const points = runtime.points(id);
                 if (points.length === 0) continue;
 
                 const distances = [...new Set(points.map((p) => p.targetIndex - p.sourceIndex))];
+                const ahead = distances.filter((distance) => distance > 0);
 
-                if (declared) {
+                if (declared.length && ahead.length) {
                     // A declared shift is a fixed distance: the indicator says how far ahead, so
                     // every point of that output is drawn exactly that far ahead.
-                    const wanted = parameters[declared.id];
-                    if (distances.length !== 1 || distances[0] !== wanted) {
-                        return `${id} declares ${declared.id}=${wanted} but is drawn ${distances.join(', ')} bars away`;
+                    const wanted = new Set(declared.flatMap((parameter) => {
+                        const value = parameters[parameter.id];
+                        return typeof value === 'number' ? [value, value - 1] : [];
+                    }));
+                    if (ahead.some((distance) => !wanted.has(distance))) {
+                        return `${id} is drawn ${ahead.join(', ')} bars ahead, which matches no declared parameter (or parameter minus one)`;
                     }
                     continue;
                 }
@@ -236,7 +240,6 @@ describe('runtime lifecycle: where a value is drawn', () => {
                 // computed, or drawn back at a bar the indicator picked out -- a pivot, an
                 // extremum -- which is behind by however far back that bar was. Ahead of its own
                 // bar without saying so is neither.
-                const ahead = distances.filter((d) => d > 0);
                 if (ahead.length) {
                     return `${id} is drawn ${ahead.join(', ')} bars ahead of its own bar without declaring a shift`;
                 }

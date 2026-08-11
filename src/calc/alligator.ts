@@ -73,13 +73,13 @@ export class AlligatorProcessor extends SequentialIndicatorProcessor<
         const lips = commit ? this.lips.push(median) : this.lips.preview(median);
         const values: IndicatorOutputValue[] = [];
         if (input.index >= this.jawLength - 1)
-            values.push(this.output('jaw', jaw, input.index + this.jawShift));
+            values.push(this.formedOutput('jaw', jaw, this.jaw.isFormed, input.index + this.jawShift));
         if (input.index >= this.teethLength - 1)
-            values.push(this.output('teeth', teeth, input.index + this.teethShift));
+            values.push(this.formedOutput('teeth', teeth, this.teeth.isFormed, input.index + this.teethShift));
         if (input.index >= this.lipsLength - 1)
-            values.push(this.output('lips', lips, input.index + this.lipsShift));
+            values.push(this.formedOutput('lips', lips, this.lips.isFormed, input.index + this.lipsShift));
         return {
-            isFormed: values.some((value) => value.value !== null),
+            isFormed: this.jaw.isFormed,
             values,
         };
     }

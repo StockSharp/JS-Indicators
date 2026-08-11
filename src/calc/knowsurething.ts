@@ -92,20 +92,26 @@ export class KnowSureThingProcessor extends SequentialIndicatorProcessor<
         commit: boolean,
     ): IndicatorCalculationResult {
         const current = finite(input.value?.close);
-        const smoothed = this.rocLengths.map((length, index) => {
-            const previous = this.closes.size >= length
-                ? (this.closes.at(this.closes.size - length) ?? null)
-                : null;
-            const roc = current !== null && previous !== null && previous !== 0
+        const rocs = this.rocLengths.map((length) => {
+            const previous = this.closes.size === 0
+                ? current
+                : this.closes.size < length
+                    ? (this.closes.front() ?? null)
+                    : (this.closes.at(this.closes.size - length) ?? null);
+            return current !== null && previous !== null && previous !== 0
                 ? finite((current - previous) / previous * 100)
                 : null;
-            return commit
-                ? this.averages[index].push(roc)
-                : this.averages[index].preview(roc);
         });
+        const roc4Formed = this.closes.size >= this.roc4Length && rocs[3] !== null;
+        const smoothed = roc4Formed
+            ? rocs.map((roc, index) => commit
+                ? this.averages[index].push(roc)
+                : this.averages[index].preview(roc))
+            : [null, null, null, null];
         if (commit) this.closes.push(current);
 
-        const kst = smoothed.every((value) => value !== null)
+        const kstFormed = roc4Formed && this.averages[3].isFormed;
+        const kst = kstFormed && smoothed.every((value) => value !== null)
             ? finite(
                 smoothed[0]! + 2 * smoothed[1]!
                 + 3 * smoothed[2]! + 4 * smoothed[3]!,
@@ -117,8 +123,8 @@ export class KnowSureThingProcessor extends SequentialIndicatorProcessor<
         return {
             isFormed: signal !== null,
             values: [
-                this.output('kst', kst, input.index),
-                this.output('signal', signal, input.index),
+                this.formedOutput('kst', kst, kstFormed, input.index),
+                this.formedOutput('signal', signal, this.signal.isFormed, input.index),
             ],
         };
     }

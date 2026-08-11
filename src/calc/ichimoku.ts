@@ -41,7 +41,7 @@ export function parameter(
 }
 
 export function lengthParameter(
-    id: 'tenkanLength' | 'kijunLength' | 'senkouBLength',
+    id: 'tenkanLength' | 'kijunLength' | 'senkouBLength' | 'chinkouLength',
     name: string,
     defaultValue: number,
     maximum: number,
@@ -61,6 +61,7 @@ export interface IchimokuParameters extends IndicatorParameters {
     readonly tenkanLength: number;
     readonly kijunLength: number;
     readonly senkouBLength: number;
+    readonly chinkouLength: number;
 }
 
 export interface IchimokuCheckpoint {
@@ -87,11 +88,13 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         readonly tenkanLength: number,
         readonly kijunLength: number,
         readonly senkouBLength: number,
+        readonly chinkouLength: number,
     ) {
         super(['tenkan', 'kijun', 'senkouA', 'senkouB', 'chikou']);
         period(tenkanLength, tenkanLength, 1, 200, 'tenkanLength');
         period(kijunLength, kijunLength, 1, 400, 'kijunLength');
         period(senkouBLength, senkouBLength, 1, 400, 'senkouBLength');
+        period(chinkouLength, chinkouLength, 1, 400, 'chinkouLength');
         this.tenkanHigh = new RollingMaximum(tenkanLength);
         this.tenkanLow = new RollingMinimum(tenkanLength);
         this.kijunHigh = new RollingMaximum(kijunLength);
@@ -129,18 +132,25 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
             ? null
             : (senkouBHigh + senkouBLow) / 2;
         const values: IndicatorOutputValue[] = [
-            this.output('tenkan', tenkan, input.index),
-            this.output('kijun', kijun, input.index),
+            this.formedOutput('tenkan', tenkan, this.tenkanHigh.isFormed && this.tenkanLow.isFormed, input.index),
+            this.formedOutput('kijun', kijun, this.kijunHigh.isFormed && this.kijunLow.isFormed, input.index),
             ...this.forward('senkouA', spanA, Math.max(this.tenkanLength, this.kijunLength) - 1, input.index),
-            ...this.forward('senkouB', spanB, this.senkouBLength - 1, input.index),
-            this.output(
+            ...this.forward(
+                'senkouB',
+                spanB,
+                Math.max(this.senkouBLength, this.kijunLength) - 1,
+                input.index,
+            ),
+            this.formedOutput(
                 'chikou',
-                input.index >= this.kijunLength - 1 ? close : null,
+                close,
+                input.index >= this.chinkouLength - 1,
                 input.index,
             ),
         ];
         return {
-            isFormed: values.some((value) => value.value !== null),
+            isFormed: input.index >= this.senkouBLength + this.kijunLength - 2
+                && input.index >= this.chinkouLength - 1,
             values,
         };
     }
@@ -189,13 +199,16 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         sourceIndex: number,
     ): IndicatorOutputValue[] {
         if (sourceIndex < rawFirst) return [];
+        if (outputId === 'senkouB' && this.senkouBLength < this.kijunLength) return [];
+        if (outputId === 'senkouA' && this.kijunLength === 1)
+            return [this.formedOutput(outputId, value, true, sourceIndex)];
         if (sourceIndex === rawFirst) {
             return [
-                this.output(outputId, value, sourceIndex + this.kijunLength - 1),
-                this.output(outputId, value, sourceIndex + this.kijunLength),
+                this.formedOutput(outputId, value, true, sourceIndex + this.kijunLength - 1),
+                this.formedOutput(outputId, value, true, sourceIndex + this.kijunLength),
             ];
         }
-        return [this.output(outputId, value, sourceIndex + this.kijunLength)];
+        return [this.formedOutput(outputId, value, true, sourceIndex + this.kijunLength)];
     }
 }
 
@@ -212,6 +225,7 @@ export const IchimokuIndicator: IndicatorDefinition<
         lengthParameter('tenkanLength', 'Tenkan', 9, 200),
         lengthParameter('kijunLength', 'Kijun', 26, 400),
         lengthParameter('senkouBLength', 'Senkou B', 52, 400),
+        lengthParameter('chinkouLength', 'Chinkou', 26, 400),
     ],
     outputs: [
         { id: 'tenkan', name: 'Tenkan', defaultStyle: lineStyle('#FF6347') },
@@ -248,5 +262,12 @@ export const IchimokuIndicator: IndicatorDefinition<
         parameter(parameters, 'tenkanLength', 'tenkanPeriod', 9, 200),
         parameter(parameters, 'kijunLength', 'kijunPeriod', 26, 400),
         parameter(parameters, 'senkouBLength', 'senkouBPeriod', 52, 400),
+        period(
+            parameters?.chinkouLength ?? parameters?.chikouLength,
+            26,
+            1,
+            400,
+            'chinkouLength',
+        ),
     ),
 });

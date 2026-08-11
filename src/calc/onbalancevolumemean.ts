@@ -50,7 +50,7 @@ export class OnBalanceVolumeMeanProcessor extends SequentialIndicatorProcessor<
         const obv = this.obv.process(input.value, commit);
         const value = commit ? this.average.push(obv) : this.average.preview(obv);
         return {
-            isFormed: value !== null,
+            isFormed: this.average.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

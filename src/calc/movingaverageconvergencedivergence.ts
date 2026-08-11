@@ -60,7 +60,7 @@ export class MovingAverageConvergenceDivergenceProcessor extends SequentialIndic
         const long = commit ? this.long.push(close) : this.long.preview(close);
         const macd = short === null || long === null ? null : short - long;
         return {
-            isFormed: macd !== null,
+            isFormed: this.long.isFormed,
             values: [this.output('macd', macd, input.index)],
         };
     }

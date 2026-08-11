@@ -75,10 +75,10 @@ export class StochasticProcessor extends SequentialIndicatorProcessor<
             : range === 0 ? 0 : 100 * (close - low!) / range;
         const d = commit ? this.d.push(k) : this.d.preview(k);
         return {
-            isFormed: d !== null,
+            isFormed: this.d.isFormed,
             values: [
-                this.output('k', k, input.index),
-                this.output('d', d, input.index),
+                this.formedOutput('k', k, this.high.isFormed && this.low.isFormed, input.index),
+                this.formedOutput('d', d, this.d.isFormed, input.index),
             ],
         };
     }

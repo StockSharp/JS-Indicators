@@ -42,7 +42,7 @@ function input(bar) {
 
 function oracle(source, length, outputId) {
     return bulkOracle(AroonIndicator, source, { length }, outputId)
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -66,7 +66,7 @@ function assertAroon(runtime, source, length) {
 
 function oscillatorOracle(source, length) {
     return bulkOracle(AroonOscillatorIndicator, source, { length })
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -85,7 +85,7 @@ function assertOscillator(runtime, source, length) {
 
 function bopOracle(source) {
     return bulkOracle(BalanceOfPowerIndicator, source, {})
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -103,7 +103,7 @@ function assertBalanceOfPower(runtime, source) {
 
 function marketPowerOracle(source, length) {
     return bulkOracle(BalanceOfMarketPowerIndicator, source, { length })
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -121,7 +121,7 @@ function assertBalanceOfMarketPower(runtime, source, length) {
 
 function choppinessOracle(source, length) {
     return bulkOracle(ChoppinessIndexIndicator, source, { length })
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -142,7 +142,7 @@ const CHANDE_KROLL_PARAMS = { period: 7, multiplier: 1.4, stopPeriod: 5 };
 
 function chandeKrollOracle(source, outputId) {
     return bulkOracle(ChandeKrollStopIndicator, source, CHANDE_KROLL_PARAMS, outputId)
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -163,7 +163,7 @@ function assertChandeKroll(runtime, source) {
 
 function elderRayOracle(source, length, outputId) {
     return bulkOracle(ElderRayIndicator, source, { length }, outputId)
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -186,7 +186,7 @@ const FIBONACCI_OUTPUTS = ['l236', 'l382', 'l500', 'l618', 'l786'];
 
 function fibonacciOracle(source, length, outputId) {
     return bulkOracle(FibonacciRetracementIndicator, source, { length }, outputId)
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -207,7 +207,7 @@ function assertFibonacci(runtime, source, length) {
 
 function vhfOracle(source, length) {
     return bulkOracle(VerticalHorizontalFilterIndicator, source, { length })
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -226,7 +226,7 @@ function assertVhf(runtime, source, length) {
 
 function vortexOracle(source, length, outputId) {
     return bulkOracle(VortexIndicator, source, { length }, outputId)
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -247,7 +247,7 @@ function assertVortex(runtime, source, length) {
 
 function bearOracle(source, length) {
     return bulkOracle(BearPowerIndicator, source, { length })
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 
@@ -265,7 +265,7 @@ function assertBearPower(runtime, source, length) {
 
 function bullOracle(source, length) {
     return bulkOracle(BullPowerIndicator, source, { length })
-        .map((point, index) => ({ index, time: point.time, value: point.value }))
+        .map((point) => ({ index: point.index, time: point.time, value: point.value }))
         .filter((point) => typeof point.value === 'number' && Number.isFinite(point.value));
 }
 

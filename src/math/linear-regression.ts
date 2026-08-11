@@ -262,12 +262,15 @@ export class RollingLinearRegression {
         ) / this.windowLength;
         // The residual is evaluated around the newest valid value rather than
         // absolute prices, avoiding catastrophic cancellation for tight price ranges.
-        const squaredError = Math.max(
+        let squaredError = Math.max(
             0,
             state.centeredSum2
                 - slope * state.centeredSumXy
                 - intercept * state.centeredSum,
         );
+        const scale = Math.max(1, Math.sqrt(Math.abs(state.centeredSum2)));
+        if (squaredError <= Number.EPSILON * scale * scale * this.windowLength * 128)
+            squaredError = 0;
         const value = Math.sqrt(squaredError / (this.windowLength - 2));
         return Number.isFinite(value) ? value : null;
     }

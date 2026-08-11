@@ -7,15 +7,22 @@ import type {
 } from './indicator-definition.js';
 import { normalizeIndicatorOutputMetadata } from './output-metadata.js';
 
+export interface IndicatorCalculationOutputValue extends IndicatorOutputValue {
+    /** Override the enclosing indicator's formation state for this output line. */
+    readonly isFormed?: boolean;
+}
+
 export interface IndicatorCalculationResult {
     readonly isFormed: boolean;
-    readonly values: readonly IndicatorOutputValue[];
+    readonly values: readonly IndicatorCalculationOutputValue[];
 }
 
 export interface SequentialIndicatorCheckpoint<TState> {
     readonly version: 1;
     readonly position: number;
     readonly formed: boolean;
+    /** Output-level formation latches. Missing only on checkpoints written by older builds. */
+    readonly formedOutputs?: readonly string[];
     readonly state: TState;
 }
 
@@ -34,6 +41,7 @@ export abstract class SequentialIndicatorProcessor<TInput, TState>
 implements IIndicatorProcessor<TInput> {
     private positionValue = 0;
     private formedValue = false;
+    private readonly formedOutputIds = new Set<string>();
     private readonly outputIds: ReadonlySet<string>;
 
     protected constructor(outputIds: readonly string[]) {
@@ -50,21 +58,19 @@ implements IIndicatorProcessor<TInput> {
     process(input: IndicatorProcessInput<TInput>): IndicatorProcessResult {
         this.validateInput(input);
         const calculation = this.calculate(input, input.isFinal);
-        const result = this.normalizeResult(calculation, input.index);
+        const result = this.normalizeResult(calculation, input.index, input.isFinal);
         // Being formed is a latch, as it is on the platform: an indicator that has warmed up stays
         // warmed up, and a bar it cannot answer for -- a flat candle, a gap, a missing volume --
         // leaves a hole in the line rather than taking the whole line back to its warm-up.
-        if (result.isFormed && input.isFinal) this.formedValue = true;
         if (input.isFinal) this.positionValue += 1;
-        return this.formedValue && !result.isFormed
-            ? Object.freeze({ ...result, isFormed: true })
-            : result;
+        return result;
     }
 
     reset(): void {
         this.resetState();
         this.positionValue = 0;
         this.formedValue = false;
+        this.formedOutputIds.clear();
     }
 
     checkpoint(): SequentialIndicatorCheckpoint<TState> {
@@ -72,6 +78,7 @@ implements IIndicatorProcessor<TInput> {
             version: 1 as const,
             position: this.positionValue,
             formed: this.formedValue,
+            formedOutputs: Object.freeze([...this.formedOutputIds]),
             state: this.captureState(),
         });
     }
@@ -84,15 +91,31 @@ implements IIndicatorProcessor<TInput> {
         }
         const previousPosition = this.positionValue;
         const previousFormed = this.formedValue;
+        const previousFormedOutputs = [...this.formedOutputIds];
         const previousState = this.captureState();
         try {
+            if ((checkpoint.formed !== undefined && typeof checkpoint.formed !== 'boolean')
+                || (checkpoint.formedOutputs !== undefined
+                    && (!Array.isArray(checkpoint.formedOutputs)
+                        || checkpoint.formedOutputs.some((id) => (
+                            typeof id !== 'string' || !this.outputIds.has(id)
+                        ))
+                        || new Set(checkpoint.formedOutputs).size !== checkpoint.formedOutputs.length))) {
+                throw new TypeError('sschart: invalid sequential indicator checkpoint formation');
+            }
             this.restoreState(checkpoint.state);
             this.positionValue = checkpoint.position;
             this.formedValue = checkpoint.formed === true;
+            this.formedOutputIds.clear();
+            const formedOutputs = checkpoint.formedOutputs
+                ?? (checkpoint.formed ? [...this.outputIds] : []);
+            for (const id of formedOutputs) this.formedOutputIds.add(id);
         } catch (error) {
             try { this.restoreState(previousState); } catch { /* preserve the original failure */ }
             this.positionValue = previousPosition;
             this.formedValue = previousFormed;
+            this.formedOutputIds.clear();
+            for (const id of previousFormedOutputs) this.formedOutputIds.add(id);
             throw error;
         }
     }
@@ -106,6 +129,22 @@ implements IIndicatorProcessor<TInput> {
         return metadata === undefined
             ? { outputId: outputIdValue, value, targetIndex }
             : { outputId: outputIdValue, value, targetIndex, metadata };
+    }
+
+    /**
+     * Emit a line whose StockSharp inner indicator forms independently from the
+     * enclosing complex indicator.
+     */
+    protected formedOutput(
+        outputIdValue: string,
+        value: number | null,
+        isFormed: boolean,
+        targetIndex = this.positionValue,
+        metadata?: IndicatorOutputMetadata,
+    ): IndicatorCalculationOutputValue {
+        return metadata === undefined
+            ? { outputId: outputIdValue, value, targetIndex, isFormed }
+            : { outputId: outputIdValue, value, targetIndex, metadata, isFormed };
     }
 
     protected abstract calculate(
@@ -135,6 +174,7 @@ implements IIndicatorProcessor<TInput> {
     private normalizeResult(
         value: IndicatorCalculationResult,
         sourceIndex: number,
+        commit: boolean,
     ): IndicatorProcessResult {
         if (value === null || typeof value !== 'object')
             throw new TypeError('sschart: indicator processor returned an invalid result');
@@ -156,6 +196,8 @@ implements IIndicatorProcessor<TInput> {
             }
             if (!Number.isInteger(item.targetIndex) || item.targetIndex < 0)
                 throw new RangeError(`sschart: indicator result '${id}' targetIndex must be non-negative`);
+            if (item.isFormed !== undefined && typeof item.isFormed !== 'boolean')
+                throw new TypeError(`sschart: indicator result '${id}' isFormed must be boolean`);
             if (values.some((existing) => (
                 existing.outputId === id && existing.targetIndex === item.targetIndex
             ))) {
@@ -165,16 +207,20 @@ implements IIndicatorProcessor<TInput> {
                 item.metadata,
                 `indicator result '${id}' metadata`,
             );
+            const formsNow = item.isFormed ?? value.isFormed;
+            const isFormed = this.formedOutputIds.has(id) || formsNow;
+            if (commit && formsNow) this.formedOutputIds.add(id);
             values.push(Object.freeze({
                 outputId: id,
-                value: item.value,
+                value: isFormed ? item.value : null,
                 targetIndex: item.targetIndex,
                 ...(metadata === undefined ? {} : { metadata }),
             }));
         });
+        if (commit && value.isFormed) this.formedValue = true;
         return Object.freeze({
             sourceIndex,
-            isFormed: value.isFormed,
+            isFormed: this.formedValue || value.isFormed,
             values: Object.freeze(values),
         });
     }

@@ -58,13 +58,19 @@ export class TripleExponentialMovingAverageProcessor extends SequentialIndicator
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const first = commit ? this.first.push(close) : this.first.preview(close);
-        const second = commit ? this.second.push(first) : this.second.preview(first);
-        const third = commit ? this.third.push(second) : this.third.preview(second);
+        const secondInput = this.first.isFormed ? first : null;
+        const second = commit
+            ? this.second.push(secondInput)
+            : this.second.preview(secondInput);
+        const thirdInput = this.second.isFormed ? second : null;
+        const third = commit
+            ? this.third.push(thirdInput)
+            : this.third.preview(thirdInput);
         const value = first === null || second === null || third === null
             ? null
             : 3 * first - 3 * second + third;
         return {
-            isFormed: value !== null,
+            isFormed: this.third.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

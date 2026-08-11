@@ -57,9 +57,9 @@ describe('SequentialIndicatorProcessor', () => {
         const secondPreview = processor.process(input(0, 5, false));
 
         assert.equal(processor.position, 0);
-        assert.equal(firstPreview.values[0].value, 2);
-        assert.equal(secondPreview.values[0].value, 5);
-        assert.equal(processor.process(input(0, 3, true)).values[0].value, 3);
+        assert.equal(firstPreview.values[0].value, null);
+        assert.equal(secondPreview.values[0].value, null);
+        assert.equal(processor.process(input(0, 3, true)).values[0].value, null);
         assert.equal(processor.position, 1);
         assert.equal(processor.process(input(1, 4, false)).values[0].value, 7);
         assert.equal(processor.position, 1);
@@ -88,7 +88,44 @@ describe('SequentialIndicatorProcessor', () => {
         assert.equal(processor.process(input(1, 1, true)).values[0].value, 3);
         processor.reset();
         assert.equal(processor.position, 0);
-        assert.equal(processor.process(input(0, 1, false)).values[0].value, 1);
+        assert.equal(processor.process(input(0, 1, false)).values[0].value, null);
+    });
+
+    it('masks warm-up values and latches independently formed complex outputs', () => {
+        class StaggeredProcessor extends SequentialIndicatorProcessor {
+            constructor() { super(['fast', 'slow']); }
+            calculate(input) {
+                return {
+                    isFormed: input.index >= 2,
+                    values: [
+                        this.formedOutput('fast', input.value, input.index >= 0, input.index),
+                        this.formedOutput('slow', input.value * 2, input.index >= 2, input.index),
+                    ],
+                };
+            }
+            resetState() {}
+            captureState() { return Object.freeze({}); }
+            restoreState() {}
+        }
+
+        const processor = new StaggeredProcessor();
+        const first = processor.process(input(0, 2, true));
+        assert.equal(first.isFormed, false);
+        assert.deepEqual(first.values.map((value) => value.value), [2, null]);
+
+        // The fast line stays formed even when a later calculation cannot newly form it.
+        const second = processor.process(input(1, 3, true));
+        assert.deepEqual(second.values.map((value) => value.value), [3, null]);
+        const checkpoint = processor.checkpoint();
+        assert.deepEqual(checkpoint.formedOutputs, ['fast']);
+
+        const third = processor.process(input(2, 4, true));
+        assert.equal(third.isFormed, true);
+        assert.deepEqual(third.values.map((value) => value.value), [4, 8]);
+
+        processor.restore(checkpoint);
+        const replayed = processor.process(input(2, 5, false));
+        assert.deepEqual(replayed.values.map((value) => value.value), [5, 10]);
     });
 
     it('rejects gaps, malformed values and undeclared or duplicate outputs', () => {
