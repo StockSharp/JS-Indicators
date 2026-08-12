@@ -11,8 +11,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: JS-Indicators
     steps:
-      - uses: actions/checkout@v6
+      # The parity project references ../StockSharp (GitHub), so reproduce the same
+      # sibling layout used by local development inside GITHUB_WORKSPACE.
+      - name: Checkout JS-Indicators
+        uses: actions/checkout@v6
+        with:
+          path: JS-Indicators
+      - name: Checkout StockSharp parity source
+        uses: actions/checkout@v6
+        with:
+          repository: StockSharp/StockSharp
+          ref: master
+          path: 'StockSharp (GitHub)'
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
       - uses: actions/setup-node@v6
         with:
           node-version: 24

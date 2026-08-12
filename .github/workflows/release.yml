@@ -26,10 +26,15 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: JS-Indicators
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout JS-Indicators
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || github.sha }}
+          path: JS-Indicators
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -51,6 +56,20 @@ jobs:
             echo "::notice::$name@$version is new -- building and publishing."
           fi
 
+      # Keep the platform source beside JS-Indicators because the parity project
+      # deliberately references the live StockSharp source tree.
+      - name: Checkout StockSharp parity source
+        if: steps.gate.outputs.publish == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: StockSharp/StockSharp
+          ref: master
+          path: 'StockSharp (GitHub)'
+      - name: Setup .NET
+        if: steps.gate.outputs.publish == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
       - name: Upgrade npm (trusted publishing needs >= 11.5.1)
         if: steps.gate.outputs.publish == 'true'
         run: npm install --global npm@11.6.2
