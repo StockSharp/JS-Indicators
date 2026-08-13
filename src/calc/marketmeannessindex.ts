@@ -30,13 +30,11 @@ export interface MarketMeannessIndexCheckpoint {
     readonly values: RingBufferCheckpoint<number>;
     readonly priceChanges: number;
     readonly directionChanges: number;
-    readonly previousDirection: -1 | 0 | 1;
 }
 
 export interface MarketMeannessEvaluation {
     readonly priceChanges: number;
     readonly directionChanges: number;
-    readonly previousDirection: -1 | 0 | 1;
     readonly size: number;
     readonly value: number | null;
 }
@@ -48,7 +46,6 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
     private readonly values: RingBuffer<number>;
     private priceChanges = 0;
     private directionChanges = 0;
-    private previousDirection: -1 | 0 | 1 = 0;
 
     constructor(readonly length: number) {
         super(['line']);
@@ -73,7 +70,6 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
             this.values.push(price);
             this.priceChanges = evaluation.priceChanges;
             this.directionChanges = evaluation.directionChanges;
-            this.previousDirection = evaluation.previousDirection;
         }
         return {
             isFormed: this.values.full,
@@ -85,7 +81,6 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
         this.values.clear();
         this.priceChanges = 0;
         this.directionChanges = 0;
-        this.previousDirection = 0;
     }
 
     protected captureState(): MarketMeannessIndexCheckpoint {
@@ -93,7 +88,6 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
             values: this.values.checkpoint(),
             priceChanges: this.priceChanges,
             directionChanges: this.directionChanges,
-            previousDirection: this.previousDirection,
         });
     }
 
@@ -103,59 +97,69 @@ export class MarketMeannessIndexProcessor extends SequentialIndicatorProcessor<
             || !Array.isArray(values) || values.length > this.length
             || values.some((value) => finite(value) === null)
             || !Number.isInteger(state.priceChanges) || state.priceChanges < 0
-            || !Number.isInteger(state.directionChanges)
-            || ![-1, 0, 1].includes(state.previousDirection)) {
+            || !Number.isInteger(state.directionChanges)) {
             throw new TypeError('sschart: invalid Market Meanness Index checkpoint');
         }
         this.values.restore(state.values);
         this.priceChanges = state.priceChanges;
         this.directionChanges = state.directionChanges;
-        this.previousDirection = state.previousDirection;
     }
 
     private evaluate(price: number, commit: boolean): MarketMeannessEvaluation {
         let priceChanges = this.priceChanges;
         let directionChanges = this.directionChanges;
-        let previousDirection = this.previousDirection;
-        const retainedSize = this.values.size - (this.values.full ? 1 : 0);
+        const size = this.values.size;
+        const full = this.values.full;
 
-        if (commit && this.values.full) {
-            const oldest = this.values.front() as number;
-            const next = this.values.at(1);
-            const removedDirection = next === undefined ? 0 : this.sign(next - oldest);
-            if (removedDirection !== 0) priceChanges -= 1;
-            if (removedDirection !== previousDirection && previousDirection !== 0)
-                directionChanges -= 1;
+        // The oldest step leaves the window before the incoming price enters it, on a preview
+        // exactly as on a commit -- a preview only unwinds copies of the two counters. What the
+        // step takes with it is its OWN successor's reversal, a different step from the newest
+        // one, so it has to be read back out of the window rather than remembered.
+        if (full) {
+            const removed = this.direction(
+                this.values.at(0) as number,
+                this.values.at(1) as number,
+            );
+            if (removed !== 0) priceChanges -= 1;
+            if (size > 2 && this.isDirectionChange(removed, this.direction(
+                this.values.at(1) as number,
+                this.values.at(2) as number,
+            ))) directionChanges -= 1;
         }
 
-        const canCompare = commit
-            ? retainedSize > 0
-            : this.values.size > 1 && price !== this.values.back();
-        if (canCompare) {
-            const addedDirection = this.sign(price - (this.values.back() as number));
-            if (addedDirection !== 0) priceChanges += 1;
-            if (addedDirection !== previousDirection && previousDirection !== 0)
+        if (size > 0) {
+            // The gained step reverses something only while two prices stay behind it, which for
+            // a full window of two the eviction above has just taken away.
+            const previous = size > (full ? 2 : 1)
+                ? this.direction(
+                    this.values.at(size - 2) as number,
+                    this.values.at(size - 1) as number,
+                )
+                : null;
+            const gained = this.direction(this.values.at(size - 1) as number, price);
+            if (gained !== 0) priceChanges += 1;
+            if (previous !== null && this.isDirectionChange(previous, gained))
                 directionChanges += 1;
-            previousDirection = addedDirection;
         }
 
-        const size = commit
-            ? Math.min(this.length, this.values.size + 1)
-            : this.values.size;
-        const candidate = size === this.length
-            ? (priceChanges > 0 ? 100 * directionChanges / priceChanges : 0)
-            : null;
+        const nextSize = commit ? Math.min(this.length, size + 1) : size;
         return {
             priceChanges,
             directionChanges,
-            previousDirection,
-            size,
-            value: finite(candidate),
+            size: nextSize,
+            value: nextSize === this.length
+                ? (priceChanges > 0 ? 100 * directionChanges / priceChanges : 0)
+                : null,
         };
     }
 
-    private sign(value: number): -1 | 0 | 1 {
-        return value > 0 ? 1 : (value < 0 ? -1 : 0);
+    private direction(previous: number, price: number): -1 | 0 | 1 {
+        return price > previous ? 1 : (price < previous ? -1 : 0);
+    }
+
+    /// A flat step reverses the rise or fall before it; nothing reverses a flat one.
+    private isDirectionChange(previous: -1 | 0 | 1, direction: -1 | 0 | 1): boolean {
+        return previous !== 0 && direction !== previous;
     }
 }
 

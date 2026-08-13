@@ -97,6 +97,7 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
             : this.remainingMaximum!.preview(close);
 
         if (commit) {
+            const wasFormed = this.closes.full;
             const periodMinimum = this.periodMinimum!.push(close);
             const periodMaximum = this.periodMaximum!.push(close);
             this.closes.push(close);
@@ -108,6 +109,9 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
                         maximum: periodMaximum,
                     }),
             );
+            // The recursion starts at the close of the bar that fills the window, so the first
+            // value the platform draws is that close whatever the fractal dimension says.
+            if (!wasFormed && this.closes.full) this.previous = close;
         }
 
         if (first === null || second === null

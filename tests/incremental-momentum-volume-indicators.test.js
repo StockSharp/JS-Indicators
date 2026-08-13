@@ -3,12 +3,14 @@ const assert = require('node:assert/strict');
 const { bulkOracle } = require('./runtime-series.js');
 
 const {
+    CommodityChannelIndexProcessor,
     DeMarkerProcessor,
     DemandIndexIndicator,
     DemandIndexProcessor,
     DisparityIndexProcessor,
     DynamicZonesRsiProcessor,
     IndicatorRuntime,
+    MarketMeannessIndexProcessor,
     PercentageVolumeOscillatorIndicator,
     PriceVolumeTrendProcessor,
     StochasticKIndicator,
@@ -55,6 +57,19 @@ function assertPoints(runtime, outputId, expected) {
             `${point.value} != ${oracle.value} at ${point.targetIndex}`,
         );
     });
+}
+
+function flatCandle(close, index) {
+    return { time: index + 1, open: close, high: close, low: close, close, volume: 1 };
+}
+
+function commitCloses(processor, closes) {
+    return closes.map((close, index) => processor.process({
+        index,
+        time: index + 1,
+        value: flatCandle(close, index),
+        isFinal: true,
+    }).values[0].value);
 }
 
 function pvoSeries(outputId) {
@@ -246,6 +261,37 @@ describe('incremental momentum and volume indicators', () => {
         runtime.reset(source.map(input));
         assert.equal(runtime.points('line')[0].sourceIndex, 28);
         assert.ok(runtime.points('line').every((point) => point.value === 0));
+    });
+
+    it('Market Meanness Index unwinds an evicted step against its own successor', () => {
+        // The flat step 2 -> 2 reverses the rise before it, so the window of three carries one
+        // direction change. Evicting 1 -> 2 takes that change with it, leaving none behind.
+        assert.deepEqual(
+            commitCloses(new MarketMeannessIndexProcessor(3), [1, 2, 2, 3]),
+            [null, null, 100, 0],
+        );
+    });
+
+    it('Market Meanness Index counts no direction change in a two-price window', () => {
+        // One price step has nothing to reverse, however often the direction flips bar to bar.
+        assert.deepEqual(
+            commitCloses(new MarketMeannessIndexProcessor(2), [1, 2, 1, 2, 1]),
+            [null, 0, 0, 0, 0],
+        );
+    });
+
+    it('Commodity Channel Index prices a preview against the window it previews', () => {
+        const processor = new CommodityChannelIndexProcessor(3);
+        commitCloses(processor, [10, 20, 30]);
+        // The preview window is 20, 30, 40 -- mean 30, mean deviation 20/3 -- not the committed
+        // 10, 20, 30 the platform has already rolled off.
+        const preview = processor.process({
+            index: 3,
+            time: 4,
+            value: flatCandle(40, 3),
+            isFinal: false,
+        });
+        assert.ok(Math.abs(preview.values[0].value - 100) <= 1e-9, `${preview.values[0].value} != 100`);
     });
 
     it('uses neutral upward coloring when candle direction is unavailable', () => {

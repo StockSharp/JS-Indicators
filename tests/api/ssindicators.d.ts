@@ -2182,12 +2182,10 @@ export interface MarketMeannessIndexCheckpoint {
     readonly values: RingBufferCheckpoint<number>;
     readonly priceChanges: number;
     readonly directionChanges: number;
-    readonly previousDirection: -1 | 0 | 1;
 }
 export interface MarketMeannessEvaluation {
     readonly priceChanges: number;
     readonly directionChanges: number;
-    readonly previousDirection: -1 | 0 | 1;
     readonly size: number;
     readonly value: number | null;
 }
@@ -2196,14 +2194,14 @@ export declare class MarketMeannessIndexProcessor extends SequentialIndicatorPro
     private readonly values;
     private priceChanges;
     private directionChanges;
-    private previousDirection;
     constructor(length: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
     protected resetState(): void;
     protected captureState(): MarketMeannessIndexCheckpoint;
     protected restoreState(state: MarketMeannessIndexCheckpoint): void;
     private evaluate;
-    private sign;
+    private direction;
+    private isDirectionChange;
 }
 export declare const MarketMeannessIndexIndicator: IndicatorDefinition<IndicatorCandle, RecursiveLengthParameters>;
 

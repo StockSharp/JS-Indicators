@@ -2,11 +2,28 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    FractalAdaptiveMovingAverageProcessor,
     IndicatorRuntime,
     JurikMovingAverageIndicator,
+    McGinleyDynamicProcessor,
     MovingAverageConvergenceDivergenceIndicator,
     SimpleMovingAverageIndicator,
 } = require('../src/index.js');
+
+function flatCandles(closes) {
+    return closes.map((close, index) => ({
+        time: index + 1, open: close, high: close, low: close, close, volume: 1,
+    }));
+}
+
+function commit(processor, closes) {
+    return flatCandles(closes).map((candle, index) => processor.process({
+        index,
+        time: candle.time,
+        value: candle,
+        isFinal: true,
+    }).values[0].value);
+}
 
 function bars(count = 80) {
     return Array.from({ length: count }, (_, index) => {
@@ -90,5 +107,18 @@ describe('core incremental indicator definitions', () => {
         });
         runtime.reset(source.map(input));
         assertPoints(runtime, finiteOracle(JurikMovingAverageIndicator, source, parameters));
+    });
+
+    it('FRAMA starts its recursion at the close of the bar that forms it', () => {
+        // Chosen so the fractal dimension clamps at 2 and alpha is ~0.01: an unseeded recursion
+        // would answer with a hundredth of the close instead of the close.
+        const values = commit(new FractalAdaptiveMovingAverageProcessor(6), [10, 20, 10, 20, 14, 15]);
+        assert.deepEqual(values.slice(0, 5), [null, null, null, null, null]);
+        assert.ok(Math.abs(values[5] - 15) <= 1e-12, `${values[5]} != 15`);
+    });
+
+    it('McGinley Dynamic repeats the close while its seed average is zero', () => {
+        const values = commit(new McGinleyDynamicProcessor(3), [0, 0, 0, 7, 7]);
+        assert.deepEqual(values, [null, null, 0, 7, 7]);
     });
 });

@@ -61,7 +61,12 @@ export class McGinleyDynamicProcessor extends SequentialIndicatorProcessor<
                 this.seedValid = seedValid;
                 if (value !== null) this.previous = value;
             }
-        } else if (price !== null && this.previous !== null && this.previous !== 0) {
+        } else if (price !== null && this.previous === 0) {
+            // A window that seeded the recursion at zero has no speed to adjust for, so the
+            // platform hands the price straight back and restarts the recursion from it.
+            value = price;
+            if (commit) this.previous = price;
+        } else if (price !== null && this.previous !== null) {
             const ratio = price / this.previous;
             const denominator = 0.6 * this.length * Math.pow(ratio, 4);
             if (Number.isFinite(denominator) && denominator !== 0) {
