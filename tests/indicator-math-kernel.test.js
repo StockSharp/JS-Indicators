@@ -112,6 +112,13 @@ describe('incremental indicator math kernel', () => {
 
     it('keeps StockSharp warm-up values separate from the formed flag', () => {
         const sma = new SimpleMovingAverage(3);
+        const warming = new SimpleMovingAverage(3);
+        assert.deepEqual([3, 6].map((value) => warming.push(value)), [1, 3]);
+        // The platform previews an unfilled window with its first sample already dropped, and
+        // goes on dropping it once the window fills: (9 - 3 + 9) / 3, then (18 - 3 + 12) / 3.
+        assert.equal(warming.preview(9), 5);
+        assert.equal(warming.push(9), 6);
+        assert.equal(warming.preview(12), 9);
         assert.deepEqual([1, 2, 3, 4].map((value) => sma.push(value)), [1 / 3, 1, 2, 3]);
         assert.equal(sma.isFormed, true);
 
@@ -145,7 +152,9 @@ describe('incremental indicator math kernel', () => {
         assert.deepEqual([3, 6].map((value) => average.push(value)), [1, 3]);
         const checkpoint = average.checkpoint();
         assert.equal(average.isFormed, false);
-        assert.equal(average.preview(9), 6);
+        // SumNoFirst drops the 3 even though the window holds only two samples, and the divisor
+        // stays the full period: (9 - 3 + 9) / 3.
+        assert.equal(average.preview(9), 5);
         assert.deepEqual(average.checkpoint(), checkpoint);
         assert.equal(average.push(Number.NaN), null);
         assert.deepEqual(average.checkpoint(), checkpoint);

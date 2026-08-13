@@ -27,6 +27,9 @@ export class CommodityChannelIndexKernel {
         return this.evaluate(numeric(value));
     }
 
+    /** Committed samples only: a forming bar never counts towards the platform's formation. */
+    get isFormed(): boolean { return this.values.full; }
+
     reset(): void { this.values.clear(); }
     checkpoint(): RingBufferCheckpoint<number | null> { return this.values.checkpoint(); }
 

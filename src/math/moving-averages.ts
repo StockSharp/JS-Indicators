@@ -29,7 +29,7 @@ export class SimpleMovingAverage {
         return sum === null ? null : sum / this.windowLength;
     }
     preview(value: NumericValue): number | null {
-        const sum = this.sum.previewPartial(value);
+        const sum = this.sum.previewWithoutOldest(value);
         return sum === null ? null : sum / this.windowLength;
     }
     reset(): void { this.sum.reset(); }
@@ -64,10 +64,13 @@ export class PartialSeedSimpleMovingAverage {
         return this.sum / this.windowLength;
     }
 
+    // StockSharp previews an SMA as (Buffer.SumNoFirst + value) / Length, and SumNoFirst drops
+    // the oldest sample as soon as the buffer holds one -- it is not the eviction a commit does,
+    // which waits for the window to fill. The two differ for the first Length-1 previews.
     preview(value: NumericValue): number | null {
         const incoming = numeric(value);
         if (incoming === null) return null;
-        const sum = this.sum - (this.buffer.full ? this.buffer.front()! : 0) + incoming;
+        const sum = this.sum - (this.buffer.size > 0 ? this.buffer.front()! : 0) + incoming;
         return sum / this.windowLength;
     }
 

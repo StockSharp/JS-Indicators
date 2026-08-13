@@ -114,7 +114,11 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
             if (!wasFormed && this.closes.full) this.previous = close;
         }
 
-        if (first === null || second === null
+        // A forming bar never reaches the platform's buffer, so it cannot be the bar that fills
+        // the window: until Length closes are committed there is nothing to draw, however
+        // complete the ranges a preview assembles happen to look.
+        if (!this.closes.full
+            || first === null || second === null
             || remainingMinimum === null || remainingMaximum === null) {
             return {
                 isFormed: false,

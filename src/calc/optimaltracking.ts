@@ -69,9 +69,10 @@ export class OptimalTrackingProcessor extends SequentialIndicatorProcessor<
         const average = (high + low) / 2;
         const halfRange = (high - low) / 2;
         // The platform takes the average into its buffer and only then asks whether it is full, so
-        // the bar that fills it is already a calculated one.
-        const seen = this.validCount + 1;
-        if (this.validCount === 0 || seen < this.length) {
+        // the bar that fills it is already a calculated one -- but only a committed bar is taken,
+        // and a forming one leaves the window exactly as the last commit left it.
+        const seen = this.validCount + (commit ? 1 : 0);
+        if (seen < this.length) {
             if (commit) {
                 this.validCount = seen;
                 this.previousAverage = average;
@@ -79,12 +80,8 @@ export class OptimalTrackingProcessor extends SequentialIndicatorProcessor<
                 this.previousResult = average;
             }
             return {
-                isFormed: seen >= this.length,
-                values: [this.output(
-                    'line',
-                    seen >= this.length ? average : null,
-                    input.index,
-                )],
+                isFormed: false,
+                values: [this.output('line', null, input.index)],
             };
         }
 

@@ -5134,6 +5134,11 @@ export declare class RollingSum {
     push(value: NumericValue): number | null;
     preview(value: NumericValue): number | null;
     previewPartial(value: NumericValue): number | null;
+    /**
+     * StockSharp's `Buffer.SumNoFirst + value`: the oldest sample leaves the sum as soon as the
+     * window holds one, rather than waiting for it to fill the way a commit's eviction does.
+     */
+    previewWithoutOldest(value: NumericValue): number | null;
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;

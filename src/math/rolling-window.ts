@@ -67,6 +67,23 @@ export class RollingSum {
         return nextSize > 0 && nextInvalid === 0 ? nextSum : null;
     }
 
+    /**
+     * StockSharp's `Buffer.SumNoFirst + value`: the oldest sample leaves the sum as soon as the
+     * window holds one, rather than waiting for it to fill the way a commit's eviction does.
+     */
+    previewWithoutOldest(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        const oldest = this.buffer.size > 0 ? this.buffer.at(0) : undefined;
+        const nextInvalid = this.invalid
+            - (oldest === null ? 1 : 0)
+            + (incoming === null ? 1 : 0);
+        if (nextInvalid !== 0) return null;
+        let sum = 0;
+        for (let index = 1; index < this.buffer.size; index += 1)
+            sum += this.buffer.at(index) ?? 0;
+        return sum + (incoming ?? 0);
+    }
+
     reset(): void {
         this.buffer.clear();
         this.sum = 0;

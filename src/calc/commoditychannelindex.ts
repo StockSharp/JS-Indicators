@@ -54,7 +54,7 @@ export class CommodityChannelIndexProcessor extends SequentialIndicatorProcessor
             : (high + low + close) / 3;
         const value = commit ? this.index.push(typical) : this.index.preview(typical);
         return {
-            isFormed: this.index.checkpoint().values.length === this.length,
+            isFormed: this.index.isFormed,
             values: [this.output('line', value, input.index)],
         };
     }

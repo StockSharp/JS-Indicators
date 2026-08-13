@@ -7,6 +7,7 @@ const {
     JurikMovingAverageIndicator,
     McGinleyDynamicProcessor,
     MovingAverageConvergenceDivergenceIndicator,
+    OptimalTrackingProcessor,
     SimpleMovingAverageIndicator,
 } = require('../src/index.js');
 
@@ -23,6 +24,26 @@ function commit(processor, closes) {
         value: candle,
         isFinal: true,
     }).values[0].value);
+}
+
+/// A bar the platform has not committed: it never reaches Buffer, so anything the indicator
+/// gates on Buffer.Count still sees the window one sample short.
+function previewNext(processor, candle) {
+    return processor.process({
+        index: processor.position,
+        time: candle.time,
+        value: candle,
+        isFinal: false,
+    }).values[0].value;
+}
+
+function commitNext(processor, candle) {
+    return processor.process({
+        index: processor.position,
+        time: candle.time,
+        value: candle,
+        isFinal: true,
+    }).values[0].value;
 }
 
 function bars(count = 80) {
@@ -120,5 +141,28 @@ describe('core incremental indicator definitions', () => {
     it('McGinley Dynamic repeats the close while its seed average is zero', () => {
         const values = commit(new McGinleyDynamicProcessor(3), [0, 0, 0, 7, 7]);
         assert.deepEqual(values, [null, null, 0, 7, 7]);
+    });
+
+    it('FRAMA does not preview a bar its committed window has not reached', () => {
+        const processor = new FractalAdaptiveMovingAverageProcessor(6);
+        commit(processor, [10, 20, 10, 20, 14]);
+        const forming = flatCandles([10, 20, 10, 20, 14, 15])[5];
+        // Five committed closes against a window of six: the sixth bar is still forming, so the
+        // platform has nothing to draw for it however complete the preview's own windows look.
+        assert.equal(previewNext(processor, forming), null);
+        assert.ok(Math.abs(commitNext(processor, forming) - 15) <= 1e-12);
+    });
+
+    it('Optimal Tracking waits for the committed window before previewing', () => {
+        const candle = (high, low, index) => ({
+            time: index + 1, open: low, high, low, close: high, volume: 1,
+        });
+        const processor = new OptimalTrackingProcessor(2);
+        assert.equal(commitNext(processor, candle(110, 90, 0)), null);
+        // One committed bar against a window of two: a forming bar never reaches the platform's
+        // buffer, so the indicator is still warming up and draws nothing.
+        const forming = candle(120, 100, 1);
+        assert.equal(previewNext(processor, forming), null);
+        assert.ok(Math.abs(commitNext(processor, forming) - 101.04652453258429) <= 1e-9);
     });
 });

@@ -9,8 +9,11 @@ const {
     DemandIndexProcessor,
     DisparityIndexProcessor,
     DynamicZonesRsiProcessor,
+    CompositeMomentumProcessor,
     IndicatorRuntime,
     MarketMeannessIndexProcessor,
+    WaveTrendOscillatorProcessor,
+    WoodiesCciProcessor,
     PercentageVolumeOscillatorIndicator,
     PriceVolumeTrendProcessor,
     StochasticKIndicator,
@@ -70,6 +73,19 @@ function commitCloses(processor, closes) {
         value: flatCandle(close, index),
         isFinal: true,
     }).values[0].value);
+}
+
+/// One bar of a still-forming candle. The platform never pushes it into a buffer, so every
+/// window the indicator reads is the one the last commit left behind.
+function previewClose(processor, close) {
+    const index = processor.position;
+    const result = processor.process({
+        index,
+        time: index + 1,
+        value: flatCandle(close, index),
+        isFinal: false,
+    });
+    return Object.fromEntries(result.values.map((value) => [value.outputId, value.value]));
 }
 
 function pvoSeries(outputId) {
@@ -292,6 +308,52 @@ describe('incremental momentum and volume indicators', () => {
             isFinal: false,
         });
         assert.ok(Math.abs(preview.values[0].value - 100) <= 1e-9, `${preview.values[0].value} != 100`);
+    });
+
+    it('Woodies CCI waits for the committed window before previewing its CCI line', () => {
+        const processor = new WoodiesCciProcessor(3, 6);
+        commitCloses(processor, [10, 20]);
+        // Two committed typical prices against a window of three. The platform's CCI is not
+        // formed, and a complex indicator in sequence mode stops there: neither line is drawn.
+        assert.deepEqual(previewClose(processor, 30), { cci: null, signal: null });
+    });
+
+    it('Composite Momentum previews its ROC legs against the base the platform keeps', () => {
+        const lengths = [1, 1, 1, 1, 1, 1];
+        const processor = new CompositeMomentumProcessor(...lengths);
+        commitCloses(processor, [100, 200, 100]);
+        // A forming bar is never pushed, so both ROC legs still measure from the close two bars
+        // back (200), not from the one bar back (100) a committed bar would have evicted it for.
+        const preview = previewClose(processor, 150);
+        assert.ok(Math.abs(preview.composite - 12.5) <= 1e-9, `${preview.composite} != 12.5`);
+        assert.ok(Math.abs(preview.sma - 12.5) <= 1e-9, `${preview.sma} != 12.5`);
+    });
+
+    it('Wave Trend previews WT2 with the oldest sample already gone', () => {
+        const closes = [10, 40, 12, 44, 14, 48, 16, 52];
+        const processor = new WaveTrendOscillatorProcessor(2, 2, 3);
+        const committed = [];
+        // Stop as soon as WT2's window of three holds two samples: that is the state where the
+        // platform's SumNoFirst and a "drop only once full" eviction give different answers.
+        for (const close of closes) {
+            if (committed.length === 2) break;
+            const index = processor.position;
+            const wt1 = processor.process({
+                index,
+                time: index + 1,
+                value: flatCandle(close, index),
+                isFinal: true,
+            }).values.find((value) => value.outputId === 'wt1').value;
+            if (wt1 !== null) committed.push(wt1);
+        }
+        assert.equal(committed.length, 2);
+
+        const preview = previewClose(processor, 20);
+        // StockSharp's SMA previews with Buffer.SumNoFirst: the oldest sample leaves the sum
+        // whether or not the window has filled, and the divisor stays the full period.
+        const expected = (committed.slice(1).reduce((sum, value) => sum + value, 0)
+            + preview.wt1) / 3;
+        assert.ok(Math.abs(preview.wt2 - expected) <= 1e-9, `${preview.wt2} != ${expected}`);
     });
 
     it('uses neutral upward coloring when candle direction is unavailable', () => {

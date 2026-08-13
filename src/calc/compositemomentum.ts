@@ -184,7 +184,10 @@ export class CompositeMomentumProcessor extends SequentialIndicatorProcessor<
     ): number | null {
         let result: number | null = null;
         if (history.size >= length) {
-            const previous = history.at(history.size - length) ?? null;
+            // The base is the close the platform's buffer holds at index 0 once this bar is in
+            // it. A commit puts it there and evicts the oldest; a preview does neither, so it
+            // measures from one close further back.
+            const previous = (commit && history.full ? history.at(1) : history.front()) ?? null;
             if (current !== null && previous !== null && previous !== 0)
                 result = finite((current - previous) / previous * 100);
         }

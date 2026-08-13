@@ -65,7 +65,9 @@ export class WoodiesCciProcessor extends SequentialIndicatorProcessor<
             ? null
             : (high + low + close) / 3;
         const cci = commit ? this.cci.push(typical) : this.cci.preview(typical);
-        if (cci === null) {
+        // An unformed inner indicator stops a sequenced complex indicator where it stands, so the
+        // signal average is not fed either. A forming bar does not count towards that formation.
+        if (cci === null || !this.cci.isFormed) {
             return {
                 isFormed: false,
                 values: [
