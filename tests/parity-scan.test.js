@@ -7,11 +7,16 @@
 //
 // This file scans the two axes that pass hides, both read from the same live C# dumper:
 //
-//   parameters   every indicator that owns a Length, run at 1, 2, 3, 6 and 21 (values.json
+//   parameters   every settable parameter moved off its default, not just Length -- integers at
+//                1, 2, 3, 6 and 21, booleans both ways, fractions at 0.5, 1 and 2 (values.json
 //                -> `variants`, produced by RunMatrix)
-//   candle shape every indicator at its defaults over eight deliberately awkward series --
-//                constant, rising, falling, spike, gap, alternating, zero volume, three bars
-//                (stress.json, produced by --stress)
+//   candle shape every indicator at its defaults over thirteen deliberately awkward series --
+//                constant, rising, falling, spike, gap, alternating, zero volume, tiny, zero
+//                price, down only, flat plateau, ties, steps (stress.json, produced by --stress)
+//
+// Both axes run on final input only. The forming bar is compared in numeric-parity.test.js, and
+// only at default parameters against a series long enough that everything has warmed up -- see
+// AGENTS.md, which says what that leaves uncovered.
 //
 // A divergence fails. There is no list to put one on, deliberately: a written-down bug is still a
 // green test, and a green test is what everybody reads. If this file is red, the port disagrees
