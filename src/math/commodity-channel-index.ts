@@ -1,3 +1,4 @@
+import { isPlatformZero } from './decimal-semantics.js';
 import { RingBuffer, type RingBufferCheckpoint } from './ring-buffer.js';
 
 type NumericValue = number | null | undefined;
@@ -59,7 +60,7 @@ export class CommodityChannelIndexKernel {
         let sum = 0;
         let flat = true;
         for (const value of window) {
-            if (value !== incoming) flat = false;
+            if (!isPlatformZero(value! - incoming!, incoming!)) flat = false;
             sum += value!;
         }
         if (flat) return null;
@@ -68,7 +69,7 @@ export class CommodityChannelIndexKernel {
         let deviation = 0;
         for (const value of window) deviation += Math.abs(value! - average);
         deviation /= this.windowLength;
-        return deviation === 0
+        return isPlatformZero(deviation, average)
             ? null
             : (incoming! - average) / (0.015 * deviation);
     }

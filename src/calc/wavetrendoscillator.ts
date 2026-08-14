@@ -17,6 +17,7 @@ import {
 } from '../sequential-processor.js';
 import {
     ExponentialMovingAverage,
+    isPlatformZero,
     PartialSeedSimpleMovingAverage,
     type RingBufferCheckpoint,
     type SeededMovingAverageCheckpoint,
@@ -80,7 +81,8 @@ export class WaveTrendOscillatorProcessor extends SequentialIndicatorProcessor<
         const deviation = commit
             ? this.deviation.push(difference)
             : this.deviation.preview(difference);
-        if (deviation === null || !this.deviation.isFormed || deviation === 0)
+        if (deviation === null || !this.deviation.isFormed
+            || isPlatformZero(deviation, typical))
             return this.empty(input.index);
 
         const wt1 = (typical - esa) / (0.015 * deviation);

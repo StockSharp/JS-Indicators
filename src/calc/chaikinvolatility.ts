@@ -16,6 +16,7 @@ import {
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
 import {
+    platformDecimal,
     RingBuffer,
     type RingBufferCheckpoint,
 } from '../math/index.js';
@@ -150,7 +151,12 @@ export class ChaikinVolatilityProcessor extends SequentialIndicatorProcessor<
             return { count, seedSum, formed, previous, value: formed ? previous : null };
         }
         const multiplier = 2 / (this.emaLength + 1);
-        const previous = value * multiplier + this.averagePrevious * (1 - multiplier);
+        // Over a run of zero ranges this average decays towards zero and the platform's decimal
+        // reaches it, after which its rate of change has no base to divide by. A double would go
+        // on shrinking for hundreds of bars more and keep reporting a ratio of two residuals.
+        const previous = platformDecimal(
+            value * multiplier + this.averagePrevious * (1 - multiplier),
+        );
         return {
             count: this.averageCount,
             seedSum: this.averageSeedSum,

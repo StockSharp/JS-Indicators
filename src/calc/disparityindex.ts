@@ -13,6 +13,7 @@ import {
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
 import {
+    isPlatformZero,
     SimpleMovingAverage,
     type RollingWindowCheckpoint,
 } from '../math/index.js';
@@ -47,7 +48,8 @@ export class DisparityIndexProcessor extends SequentialIndicatorProcessor<
         const average = commit
             ? this.average.push(close)
             : this.average.preview(close);
-        const value = close === null || average === null || average === 0
+        const value = close === null || average === null
+            || isPlatformZero(average, close)
             ? null
             : finite((close - average) / average * 100);
         return {

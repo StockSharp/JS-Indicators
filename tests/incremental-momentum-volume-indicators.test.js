@@ -10,6 +10,7 @@ const {
     DisparityIndexProcessor,
     DynamicZonesRsiProcessor,
     CompositeMomentumProcessor,
+    getIndicatorDefinition,
     IndicatorRuntime,
     MarketMeannessIndexProcessor,
     WaveTrendOscillatorProcessor,
@@ -354,6 +355,72 @@ describe('incremental momentum and volume indicators', () => {
         const expected = (committed.slice(1).reduce((sum, value) => sum + value, 0)
             + preview.wt1) / 3;
         assert.ok(Math.abs(preview.wt2 - expected) <= 1e-9, `${preview.wt2} != ${expected}`);
+    });
+
+    it('draws nothing where the platform divides by a decimal zero', () => {
+        // Every case below sums to exactly zero in decimal and to arithmetic noise in double, so
+        // an exact `=== 0` guard misses and the division returns the residual over itself.
+        const line = (kind, params, bars, outputId = 'line') => {
+            const runtime = new IndicatorRuntime({
+                definition: getIndicatorDefinition(kind),
+                parameters: params,
+            });
+            runtime.reset(bars.map((bar, index) => ({ time: index + 1, value: bar })));
+            return runtime.points(outputId).map((point) => point.value);
+        };
+        const flat = (closes) => closes.map((close, index) => flatCandle(close, index));
+
+        // 0.7 + 0.1 - 0.8: the window's prices cancel, so there is no centre of gravity.
+        assert.deepEqual(
+            line('CenterOfGravityOscillator', { length: 3 }, flat([5, 4, 0.7, 0.1, -0.8])),
+            [-0.44329896907216493, -0.8125],
+        );
+        // 0.1 + 0.2 - 0.3: nothing to express a distance from.
+        assert.deepEqual(line('DisparityIndex', { length: 3 }, flat([0.1, 0.2, -0.3])), []);
+        // A zero long average is the platform's own zero case, and it answers zero rather than null.
+        assert.deepEqual(
+            line('PercentagePriceOscillator', { shortPeriod: 1, longPeriod: 3 },
+                flat([10.1, 20.2, -30.3]), 'ppo'),
+            [0],
+        );
+        // A price that never moves has no deviation to divide by.
+        assert.deepEqual(
+            line('WaveTrendOscillator', { esaPeriod: 10, dPeriod: 14, averagePeriod: 3 },
+                flat(Array.from({ length: 30 }, () => 100.1)), 'wt1'),
+            [],
+        );
+        // Two candles whose typical price is the same decimal but different doubles: still flat.
+        const sameTypical = [[10.05, 10.01, 10.03], [10.03, 10.03, 10.03]];
+        assert.deepEqual(
+            line('CommodityChannelIndex', { length: 3 },
+                Array.from({ length: 4 }, (_, index) => {
+                    const [high, low, close] = sameTypical[index % 2];
+                    return { time: index + 1, open: close, high, low, close, volume: 1 };
+                })),
+            [],
+        );
+        // A zero close is no denominator for a percentage, at length 1 as at any other.
+        assert.deepEqual(line('ForecastOscillator', { length: 1 }, flat([100, 0])), [0]);
+    });
+
+    it('lets Chaikin volatility reach the zero the platform reaches', () => {
+        const bars = [
+            { time: 1, open: 100, high: 101, low: 99, close: 100, volume: 1 },
+            ...Array.from({ length: 70 }, (_, index) => ({
+                time: index + 2, open: 100, high: 100, low: 100, close: 100, volume: 1,
+            })),
+        ];
+        const runtime = new IndicatorRuntime({
+            definition: getIndicatorDefinition('ChaikinVolatility'),
+            parameters: { emaLength: 2, rocLength: 3 },
+        });
+        runtime.reset(bars.map((bar, index) => ({ time: index + 1, value: bar })));
+        const points = runtime.points('line');
+        // The average of a zero range decays by a third a bar and decimal reaches zero, after
+        // which the rate of change has no base left to divide by and the line simply stops.
+        assert.ok(points.length > 0 && points.length < bars.length - 4,
+            `expected the line to stop, got ${points.length} of ${bars.length} bars`);
+        assert.equal(points[points.length - 1].value, -100);
     });
 
     it('uses neutral upward coloring when candle direction is unavailable', () => {

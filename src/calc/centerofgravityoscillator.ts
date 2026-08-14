@@ -15,6 +15,7 @@ import {
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
 import {
+    isPlatformZero,
     LinearWeightedMovingAverage,
     RollingSum,
     type RollingWindowCheckpoint,
@@ -60,7 +61,9 @@ export class CenterOfGravityOscillatorProcessor extends SequentialIndicatorProce
         const weightedAverage = commit
             ? this.weighted.push(close)
             : this.weighted.preview(close);
-        const candidate = sum !== null && sum !== 0 && weightedAverage !== null
+        // The window's prices can cancel exactly in decimal while leaving a residual here.
+        const candidate = sum !== null && weightedAverage !== null
+            && !isPlatformZero(sum, (close ?? 0) * this.length)
             ? weightedAverage * this.divisor / sum - this.center
             : null;
         const value = finite(candidate);

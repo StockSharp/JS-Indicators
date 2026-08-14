@@ -11,6 +11,7 @@ import {
     type IndicatorProcessInput,
 } from '../indicator-definition.js';
 import { registerIndicator } from '../indicator-registry.js';
+import { isPlatformZero } from '../math/index.js';
 import {
     SequentialIndicatorProcessor,
     type IndicatorCalculationResult,
@@ -66,9 +67,9 @@ export class PercentagePriceOscillatorHistogramProcessor extends SequentialIndic
         const close = finite(input.value?.close);
         const short = commit ? this.short.push(close) : this.short.preview(close);
         const long = commit ? this.long.push(close) : this.long.preview(close);
-        const ppo = short === null || long === null
+        const ppo = short === null || long === null || close === null
             ? null
-            : (long === 0 ? 0 : finite((short - long) / long * 100));
+            : (isPlatformZero(long, close) ? 0 : finite((short - long) / long * 100));
         const ppoFormed = this.short.isFormed && this.long.isFormed;
         const signalInput = ppoFormed ? ppo : null;
         const signal = commit
