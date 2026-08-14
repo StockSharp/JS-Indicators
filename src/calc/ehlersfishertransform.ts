@@ -57,8 +57,10 @@ export class EhlersFisherTransformProcessor extends SequentialIndicatorProcessor
     ): IndicatorCalculationResult {
         const currentHigh = finite(input.value?.high);
         const currentLow = finite(input.value?.low);
-        const high = commit ? this.high.push(currentHigh) : this.high.preview(currentHigh);
-        const low = commit ? this.low.push(currentLow) : this.low.preview(currentLow);
+        // `_highBuffer.Max` / `_lowBuffer.Min` are read as-is on both paths and pushed on a final
+        // input only: a forming bar feeds the median price but never widens the range.
+        const high = commit ? this.high.push(currentHigh) : this.high.value;
+        const low = commit ? this.low.push(currentLow) : this.low.value;
         let main: number | null = null;
         let trigger: number | null = null;
         let nextValue = this.previousValue;

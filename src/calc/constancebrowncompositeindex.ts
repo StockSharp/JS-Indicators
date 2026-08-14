@@ -171,7 +171,13 @@ export class ConstanceBrownCompositeIndexProcessor extends SequentialIndicatorPr
     private roc(current: number | null, commit: boolean): number | null {
         let result: number | null = null;
         if (this.rsiHistory.size >= this.rocLength) {
-            const previous = this.rsiHistory.at(this.rsiHistory.size - this.rocLength) ?? null;
+            // Momentum subtracts `Buffer[0]` and pushes only on a final input, so the base a
+            // preview reads sits one sample further back than the base the commit for the same
+            // bar uses: the window it reads has not been rolled yet.
+            const offset = this.rsiHistory.size - this.rocLength - (commit ? 0 : 1);
+            const previous = (offset > 0
+                ? this.rsiHistory.at(offset)
+                : this.rsiHistory.front()) ?? null;
             if (current !== null && previous !== null && previous !== 0)
                 result = finite((current - previous) / previous * 100);
         }

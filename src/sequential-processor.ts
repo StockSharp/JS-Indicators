@@ -208,7 +208,12 @@ implements IIndicatorProcessor<TInput> {
                 `indicator result '${id}' metadata`,
             );
             const formsNow = item.isFormed ?? value.isFormed;
-            const isFormed = this.formedOutputIds.has(id) || formsNow;
+            // A preview can never be the bar an indicator forms on. StockSharp pushes into a buffer
+            // only on a final input, so the bar being previewed is in no window and cannot be the
+            // sample that completes one -- whether the platform expresses that as `Buffer.Count >=
+            // Length` or as an `IsFormed = true` sitting inside `if (input.IsFinal)`. Answering
+            // otherwise draws the first point of a line one bar early.
+            const isFormed = this.formedOutputIds.has(id) || (commit && formsNow);
             if (commit && formsNow) this.formedOutputIds.add(id);
             values.push(Object.freeze({
                 outputId: id,
@@ -220,7 +225,7 @@ implements IIndicatorProcessor<TInput> {
         if (commit && value.isFormed) this.formedValue = true;
         return Object.freeze({
             sourceIndex,
-            isFormed: this.formedValue || value.isFormed,
+            isFormed: this.formedValue,
             values: Object.freeze(values),
         });
     }

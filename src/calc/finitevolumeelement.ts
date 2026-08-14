@@ -57,7 +57,11 @@ export class FiniteVolumeElementProcessor extends SequentialIndicatorProcessor<
             const volumeForce = volume * (2 * ((close - low!) / range) - 1);
             raw = volumeForce / volume;
         }
-        const average = commit ? this.average.push(raw) : this.average.preview(raw);
+        // The platform previews as `Buffer.Sum + (fve - Buffer.Back())`: a forming bar replaces the
+        // newest committed sample instead of rolling the window, and only over a full window.
+        const average = commit
+            ? this.average.push(raw)
+            : this.average.previewReplacingLatest(raw);
         const value = average === null ? null : finite(average * 100);
         return {
             isFormed: this.average.isFormed,

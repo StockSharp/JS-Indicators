@@ -53,11 +53,17 @@ export class DonchianChannelsProcessor extends SequentialIndicatorProcessor<
             ? this.low.push(finite(input.value?.low))
             : this.low.preview(finite(input.value?.low));
         const formed = upper !== null && lower !== null;
+        // The middle band averages `UpperBand.GetCurrentValue()` and `LowerBand.GetCurrentValue()`,
+        // which read the indicator container -- a non-final input is never added to it. A previewed
+        // midpoint is therefore the last committed channel's, not the forming bar's.
+        const middleUpper = commit ? upper : this.high.value;
+        const middleLower = commit ? lower : this.low.value;
+        const middleFormed = middleUpper !== null && middleLower !== null;
         return {
             isFormed: formed,
             values: [
                 this.output('upper', formed ? upper : null, input.index),
-                this.output('middle', formed ? (upper + lower) / 2 : null, input.index),
+                this.output('middle', middleFormed ? (middleUpper + middleLower) / 2 : null, input.index),
                 this.output('lower', formed ? lower : null, input.index),
             ],
         };

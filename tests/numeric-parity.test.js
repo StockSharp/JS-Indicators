@@ -14,7 +14,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runtimeSeries } = require('./runtime-series.js');
+const { runtimeSeries, runtimeLivePreviews } = require('./runtime-series.js');
 const { loadDumpStatus, readDump, requireDump } = require('./csharp-dump.js');
 const { assertRecorded } = require('./parity-exceptions.js');
 const { getIndicatorDefinition } = require('../src/index.js');
@@ -162,6 +162,62 @@ describe('numeric parity: JS calc vs StockSharp C#', () => {
             }
         }
         assert.equal(failures.length, 0, 'changing-candle parity mismatches:\n' + failures.slice(0, 40).join('\n'));
+    });
+
+    // The probe check above previews a bar appended to the whole series, so it only ever reaches an
+    // indicator whose windows are full and which formed long ago. This one previews EVERY bar before
+    // closing it -- the order a live chart produces -- so the warm-up previews are compared too.
+    // That gap is where the platform's preview arithmetic actually differs: StockSharp's SMA answers
+    // `Buffer.SumNoFirst + value`, dropping its oldest sample even before the window has filled, and
+    // an indicator gating on `Buffer.Count` sees the window one sample short throughout.
+    it('every indicator matches StockSharp on a bar previewed before it closes', (t) => {
+        if (!requireDump(t, status)) return;
+
+        const candles = dump.data.input.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v }));
+        const failures = [];
+        let compared = 0;
+
+        // A multi-line indicator's C# inner order is not this port's output order, so its lines are
+        // matched as a set -- the same rule the committed complex comparison below uses.
+        const lineMatch = (a, b) => a.length === b.length && b.every((v, i) => close(a[i], v));
+
+        for (const cs of dump.data.indicators) {
+            const kind = cs.kind;
+            const definition = getIndicatorDefinition(kind);
+            if (!definition) continue;
+
+            const csLines = Array.isArray(cs.warmupPreviews)
+                ? [cs.warmupPreviews]
+                : (Array.isArray(cs.lineWarmupPreviews) ? cs.lineWarmupPreviews : null);
+            if (!csLines) continue;
+
+            const jsOut = runtimeLivePreviews(kind, candles, toJsParams(cs.params));
+            const jsLines = Array.isArray(jsOut) ? [jsOut] : Object.values(jsOut);
+
+            for (let li = 0; li < csLines.length; li++) {
+                const csLine = csLines[li];
+                if (!Array.isArray(csLine)) continue;
+                compared += 1;
+                if (jsLines.some((jsLine) => Array.isArray(jsLine) && lineMatch(jsLine, csLine))) continue;
+
+                // Report against the nearest line rather than "no match": the bar it first parts
+                // company with is the whole diagnosis, and a set-membership failure hides it.
+                const nearest = jsLines
+                    .filter((l) => Array.isArray(l) && l.length === csLine.length)
+                    .map((l) => ({ line: l, at: csLine.findIndex((v, i) => !close(l[i], v)) }))
+                    .sort((x, y) => y.at - x.at)[0];
+                const name = (cs.lineNames && cs.lineNames[li]) || definition.outputs[li]?.id || `#${li}`;
+                failures.push(nearest
+                    ? `${kind} ${name}: first diverges at bar ${nearest.at} (js=${nearest.line[nearest.at]} cs=${csLine[nearest.at]})`
+                    : `${kind} ${name}: no JS line of matching length`);
+            }
+        }
+
+        assert.ok(compared > 100, `expected the dump to carry warm-up previews for the catalogue, compared ${compared} lines`);
+        assert.equal(
+            failures.length, 0,
+            `warm-up preview parity: ${failures.length} of ${compared} lines diverge\n` + failures.join('\n'),
+        );
     });
 
     // Full coverage: run EVERY scalar C# indicator (single-output, plus the primary line of the

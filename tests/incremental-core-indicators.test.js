@@ -168,24 +168,23 @@ describe('core incremental indicator definitions', () => {
         assert.ok(Math.abs(commitNext(processor, forming) - 101.04652453258429) <= 1e-9);
     });
 
-    it('Keltner previews its warm-up middle with the oldest close already dropped', () => {
-        const closes = [100, 104, 99, 107, 103];
+    it('Keltner draws no middle until a commit has formed it', () => {
+        const closes = [100, 104, 99, 107, 103, 111, 108];
         const processor = new KeltnerChannelsProcessor(6, 2);
-        const candles = flatCandles([...closes, 111]);
-        candles.slice(0, closes.length).forEach((bar, index) => processor.process({
-            index, time: bar.time, value: bar, isFinal: true,
-        }));
-        const preview = processor.process({
-            index: closes.length,
-            time: candles[closes.length].time,
-            value: candles[closes.length],
-            isFinal: false,
+        const candles = flatCandles(closes);
+        const middleOf = (result) => result.values.find((value) => value.outputId === 'middle').value;
+        const at = (index, isFinal) => processor.process({
+            index, time: candles[index].time, value: candles[index], isFinal,
         });
-        const middle = preview.values.find((value) => value.outputId === 'middle').value;
-        // The middle line is the platform's EMA, still seeding: (Buffer.SumNoFirst + close) over
-        // the full period, so the first committed close leaves the sum before the preview enters.
-        const expected = (closes.slice(1).reduce((sum, close) => sum + close, 0) + 111) / 6;
-        assert.ok(Math.abs(middle - expected) <= 1e-12, `${middle} != ${expected}`);
+
+        for (let index = 0; index < 5; index += 1) at(index, true);
+        // Five committed closes against a period of six: the platform's EMA is not formed, and the
+        // bar that would fill it is the one still forming -- which never reaches its buffer. The
+        // seeding arithmetic underneath is pinned on the kernel, where it is observable.
+        assert.equal(middleOf(at(5, false)), null);
+
+        at(5, true);
+        assert.notEqual(middleOf(at(6, false)), null);
     });
 
     it('Vidya does not let a forming bar fill its seed window', () => {

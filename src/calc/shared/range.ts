@@ -108,6 +108,20 @@ class AroonKernel {
     private evaluate(high: number | null, low: number | null, commit: boolean): AroonValue {
         if (high === null || low === null) return { up: null, down: null };
 
+        if (!commit) {
+            // A forming bar never reaches the platform's buffer: the committed extreme and its age
+            // are read untouched, no eviction rescan runs, and the comparison is strict where the
+            // commit's is not, so a bar that only ties the extreme ages it. The age is not clamped,
+            // so the value goes negative once the extreme is older than the window.
+            if (!this.highs.full) return { up: null, down: null };
+            const previewMaximumAge = high > this.maximum ? 0 : this.maximumAge + 1;
+            const previewMinimumAge = low < this.minimum ? 0 : this.minimumAge + 1;
+            return {
+                up: 100 * (this.windowLength - previewMaximumAge) / this.windowLength,
+                down: 100 * (this.windowLength - previewMinimumAge) / this.windowLength,
+            };
+        }
+
         let maximum = this.maximum;
         let maximumAge = this.maximumAge;
         let minimum = this.minimum;

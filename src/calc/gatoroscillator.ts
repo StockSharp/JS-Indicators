@@ -152,15 +152,21 @@ export class GatorOscillatorProcessor extends SequentialIndicatorProcessor<
         sourceIndex: number,
         commit: boolean,
     ): number | null {
-        const current = commit ? average.push(median) : average.preview(median);
+        // Nothing is computed for a bar that is still forming: the histogram cannot see it, so the
+        // average is advanced by a commit only.
+        const current = commit ? average.push(median) : null;
         const candidate = sourceIndex >= length - 1 ? current : null;
         if (commit) {
             delay.push(candidate);
             const index = delay.size - shift - 1;
             return index < 0 ? null : (delay.at(index) ?? null);
         }
-        if (shift === 0) return candidate;
-        const index = delay.size - shift;
+        // The forming bar never reaches the histogram. GatorHistogram reads its two lines through
+        // `GetNullableCurrentValue()`, which is the line's container, and `BaseIndicator.Process`
+        // fills that container only `if (input.IsFinal)` -- so a preview still sees what each line
+        // returned for the bar before it, whatever those lines computed for the bar being
+        // previewed. That is the slot the previous commit read, at every shift.
+        const index = delay.size - shift - 1;
         return index < 0 ? null : (delay.at(index) ?? null);
     }
 

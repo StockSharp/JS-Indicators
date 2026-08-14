@@ -88,6 +88,57 @@ static Pass RunSeries(IndicatorType type, IIndicator indicator, List<TimeFrameCa
         : new Pass { Lines = lines, LineNames = inners.ConvertAll(x => x.Name), Shifts = shifts };
 }
 
+// One pass that previews every bar before closing it, which is the sequence a live chart produces.
+// The appended probes never reach this: they land after the whole series, where every window is
+// full and every indicator formed long ago, so nothing compared the arithmetic StockSharp uses
+// while a buffer is still filling -- SMA answers Buffer.SumNoFirst + value there, dropping a sample
+// the committed path keeps. Takes its own instance so the committed dump stays a clean run and a
+// platform indicator that does mutate on a non-final input shows up as a preview divergence rather
+// than corrupting the values it is compared against.
+static Pass LivePass(IndicatorType type, List<TimeFrameCandleMessage> input)
+{
+    try { return RunLive(type, (IIndicator)Activator.CreateInstance(type.Indicator), input); }
+    catch (Exception ex) { return new Pass { Threw = ex.GetType().Name + ": " + ex.Message }; }
+}
+
+static Pass RunLive(IndicatorType type, IIndicator indicator, List<TimeFrameCandleMessage> input)
+{
+    var inners = indicator is IComplexIndicator ci && ci.InnerIndicators.Count > 0 ? ci.InnerIndicators.ToList() : null;
+    var values = new List<object>();
+    var lines = new List<List<object>>();
+    if (inners is not null)
+        for (var li = 0; li < inners.Count; li++) lines.Add([]);
+
+    try
+    {
+        foreach (var candle in input)
+        {
+            var res = indicator.Process(MakeInput(type, indicator, candle, false));
+            if (inners is null)
+                values.Add(res.IsEmpty || !indicator.IsFormed ? null : res.GetValue<decimal>());
+            else
+            {
+                var cv = res as IComplexIndicatorValue;
+                for (var li = 0; li < inners.Count; li++)
+                {
+                    object val = null;
+                    if (inners[li].IsFormed && cv is not null && cv.InnerValues.TryGetValue(inners[li], out var iv) && !iv.IsEmpty)
+                    {
+                        try { val = iv.GetValue<decimal>(); } catch { }
+                    }
+                    lines[li].Add(val);
+                }
+            }
+            indicator.Process(MakeInput(type, indicator, candle, true));
+        }
+    }
+    catch (Exception ex) { return new Pass { Threw = ex.GetType().Name + ": " + ex.Message }; }
+
+    return inners is null
+        ? new Pass { Values = values }
+        : new Pass { Lines = lines, LineNames = inners.ConvertAll(x => x.Name) };
+}
+
 // Run one indicator over the series once per matrix width, returning the per-width outputs a
 // client calc has to reproduce.
 static List<object> RunMatrix(IndicatorType type, List<TimeFrameCandleMessage> input, HashSet<string> excluded)
@@ -529,8 +580,9 @@ if (args.Contains("--values"))
             }
             catch { okc = false; }
 
+            var liveComplex = LivePass(e, input);
             if (okc)
-                outInds.Add(new { kind = e.Indicator.Name, @params = pdict, lines, lineNames = inners.Select(x => x.Name).ToList(), shifts = lineShifts, variants = RunMatrix(e, input, excluded) });
+                outInds.Add(new { kind = e.Indicator.Name, @params = pdict, lines, lineNames = inners.Select(x => x.Name).ToList(), shifts = lineShifts, lineWarmupPreviews = liveComplex.Lines, variants = RunMatrix(e, input, excluded) });
             else
                 outInds.Add(new { kind = e.Indicator.Name, @params = pdict, complex = true });
             continue;
@@ -560,7 +612,7 @@ if (args.Contains("--values"))
         catch { ok = false; }
         if (!ok) continue;
 
-        outInds.Add(new { kind = e.Indicator.Name, @params = pdict, values, shifts, previews, variants = RunMatrix(e, input, excluded) });
+        outInds.Add(new { kind = e.Indicator.Name, @params = pdict, values, shifts, previews, warmupPreviews = LivePass(e, input).Values, variants = RunMatrix(e, input, excluded) });
     }
 
     var payload = new

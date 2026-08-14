@@ -84,8 +84,11 @@ export class FractalsProcessor extends SequentialIndicatorProcessor<
 
         const targetIndex = input.index - Math.floor(this.length / 2);
         const values: IndicatorOutputValue[] = [];
-        if (up !== null) values.push(this.output('up', up, targetIndex));
-        if (down !== null) values.push(this.output('down', down, targetIndex));
+        // `FractalPart.OnProcess` answers a non-final input with an empty value before it reads the
+        // candle at all, so a forming bar never confirms a fractal -- not even one sitting on a
+        // window that is already complete.
+        if (commit && up !== null) values.push(this.output('up', up, targetIndex));
+        if (commit && down !== null) values.push(this.output('down', down, targetIndex));
         return {
             isFormed: window.length === this.length,
             values,

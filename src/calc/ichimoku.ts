@@ -17,8 +17,10 @@ import {
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
 import {
+    RingBuffer,
     RollingMaximum,
     RollingMinimum,
+    type RingBufferCheckpoint,
     type RollingWindowCheckpoint,
 } from '../math/index.js';
 import {
@@ -73,6 +75,9 @@ export interface IchimokuCheckpoint {
     readonly kijunLow: RollingWindowCheckpoint;
     readonly senkouBHigh: RollingWindowCheckpoint;
     readonly senkouBLow: RollingWindowCheckpoint;
+    /** The spans held back for Kijun bars, which a preview reports and never adds to. */
+    readonly senkouADelay: RingBufferCheckpoint<number | null>;
+    readonly senkouBDelay: RingBufferCheckpoint<number | null>;
 }
 
 export class IchimokuProcessor extends SequentialIndicatorProcessor<
@@ -85,6 +90,8 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
     private readonly kijunLow: RollingMinimum;
     private readonly senkouBHigh: RollingMaximum;
     private readonly senkouBLow: RollingMinimum;
+    private readonly senkouADelay: RingBuffer<number | null>;
+    private readonly senkouBDelay: RingBuffer<number | null>;
 
     constructor(
         readonly tenkanLength: number,
@@ -103,6 +110,8 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         this.kijunLow = new RollingMinimum(kijunLength);
         this.senkouBHigh = new RollingMaximum(senkouBLength);
         this.senkouBLow = new RollingMinimum(senkouBLength);
+        this.senkouADelay = new RingBuffer(kijunLength);
+        this.senkouBDelay = new RingBuffer(kijunLength);
     }
 
     protected calculate(
@@ -112,16 +121,26 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         const high = finite(input.value?.high);
         const low = finite(input.value?.low);
         const close = finite(input.value?.close);
-        const tenkanHigh = commit ? this.tenkanHigh.push(high) : this.tenkanHigh.preview(high);
-        const tenkanLow = commit ? this.tenkanLow.push(low) : this.tenkanLow.preview(low);
-        const kijunHigh = commit ? this.kijunHigh.push(high) : this.kijunHigh.preview(high);
-        const kijunLow = commit ? this.kijunLow.push(low) : this.kijunLow.preview(low);
+        // `IchimokuLine` previews over `_buffer.Skip(1).Append((high, low))`: the forming bar
+        // takes the oldest sample's place, so the window is Length prices, not Length + 1.
+        const tenkanHigh = commit
+            ? this.tenkanHigh.push(high)
+            : this.tenkanHigh.previewWithoutOldest(high);
+        const tenkanLow = commit
+            ? this.tenkanLow.push(low)
+            : this.tenkanLow.previewWithoutOldest(low);
+        const kijunHigh = commit
+            ? this.kijunHigh.push(high)
+            : this.kijunHigh.previewWithoutOldest(high);
+        const kijunLow = commit
+            ? this.kijunLow.push(low)
+            : this.kijunLow.previewWithoutOldest(low);
         const senkouBHigh = commit
             ? this.senkouBHigh.push(high)
-            : this.senkouBHigh.preview(high);
+            : this.senkouBHigh.previewWithoutOldest(high);
         const senkouBLow = commit
             ? this.senkouBLow.push(low)
-            : this.senkouBLow.preview(low);
+            : this.senkouBLow.previewWithoutOldest(low);
 
         const tenkan = tenkanHigh === null || tenkanLow === null
             ? null
@@ -136,12 +155,21 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         const values: IndicatorOutputValue[] = [
             this.formedOutput('tenkan', tenkan, this.tenkanHigh.isFormed && this.tenkanLow.isFormed, input.index),
             this.formedOutput('kijun', kijun, this.kijunHigh.isFormed && this.kijunLow.isFormed, input.index),
-            ...this.forward('senkouA', spanA, Math.max(this.tenkanLength, this.kijunLength) - 1, input.index),
+            ...this.forward(
+                'senkouA',
+                this.senkouADelay,
+                spanA,
+                Math.max(this.tenkanLength, this.kijunLength) - 1,
+                input.index,
+                commit,
+            ),
             ...this.forward(
                 'senkouB',
+                this.senkouBDelay,
                 spanB,
                 Math.max(this.senkouBLength, this.kijunLength) - 1,
                 input.index,
+                commit,
             ),
             this.formedOutput(
                 'chikou',
@@ -164,6 +192,8 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         this.kijunLow.reset();
         this.senkouBHigh.reset();
         this.senkouBLow.reset();
+        this.senkouADelay.clear();
+        this.senkouBDelay.clear();
     }
 
     protected captureState(): IchimokuCheckpoint {
@@ -174,6 +204,8 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
             kijunLow: this.kijunLow.checkpoint(),
             senkouBHigh: this.senkouBHigh.checkpoint(),
             senkouBLow: this.senkouBLow.checkpoint(),
+            senkouADelay: this.senkouADelay.checkpoint(),
+            senkouBDelay: this.senkouBDelay.checkpoint(),
         });
     }
 
@@ -183,7 +215,9 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
             || !validWindow(state?.kijunHigh, this.kijunLength)
             || !validWindow(state?.kijunLow, this.kijunLength)
             || !validWindow(state?.senkouBHigh, this.senkouBLength)
-            || !validWindow(state?.senkouBLow, this.senkouBLength)) {
+            || !validWindow(state?.senkouBLow, this.senkouBLength)
+            || !validWindow(state?.senkouADelay, this.kijunLength)
+            || !validWindow(state?.senkouBDelay, this.kijunLength)) {
             throw new TypeError('sschart: invalid Ichimoku checkpoint');
         }
         this.tenkanHigh.restore(state.tenkanHigh);
@@ -192,18 +226,31 @@ export class IchimokuProcessor extends SequentialIndicatorProcessor<
         this.kijunLow.restore(state.kijunLow);
         this.senkouBHigh.restore(state.senkouBHigh);
         this.senkouBLow.restore(state.senkouBLow);
+        this.senkouADelay.restore(state.senkouADelay);
+        this.senkouBDelay.restore(state.senkouBDelay);
     }
 
     private forward(
         outputId: 'senkouA' | 'senkouB',
+        delay: RingBuffer<number | null>,
         value: number | null,
         rawFirst: number,
         sourceIndex: number,
+        commit: boolean,
     ): IndicatorOutputValue[] {
+        // A forming bar never reaches the platform's delay line: `IchimokuSenkouALine` pushes
+        // `if (input.IsFinal)` and answers `Buffer[0]`. So a preview repeats the span already
+        // standing on this bar and adds nothing to the future one.
+        if (!commit) {
+            return delay.full
+                ? [this.formedOutput(outputId, delay.front() ?? null, true, sourceIndex)]
+                : [];
+        }
         if (sourceIndex < rawFirst) return [];
         if (outputId === 'senkouB' && this.senkouBLength < this.kijunLength) return [];
         if (outputId === 'senkouA' && this.kijunLength === 1)
             return [this.formedOutput(outputId, value, true, sourceIndex)];
+        delay.push(value);
         if (sourceIndex === rawFirst) {
             return [
                 this.formedOutput(outputId, value, true, sourceIndex + this.kijunLength - 1),

@@ -89,12 +89,13 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
         // resolved from committed state for final input and previews alike.
         const first = this.delayedRange(this.period + this.remaining);
         const second = this.delayedRange(this.remaining);
+        const previewed = commit ? null : this.previewRange(close);
         const remainingMinimum = commit
             ? this.remainingMinimum!.push(close)
-            : this.remainingMinimum!.preview(close);
+            : (previewed === null ? null : previewed.minimum);
         const remainingMaximum = commit
             ? this.remainingMaximum!.push(close)
-            : this.remainingMaximum!.preview(close);
+            : (previewed === null ? null : previewed.maximum);
 
         if (commit) {
             const wasFormed = this.closes.full;
@@ -180,6 +181,21 @@ export class FractalAdaptiveMovingAverageProcessor extends SequentialIndicatorPr
         const ranges = this.periodRanges!;
         const index = ranges.size - offset;
         return index < 0 ? null : (ranges.at(index) ?? null);
+    }
+
+    // A preview shifts the whole window one bar forward: the platform reads a forming bar as
+    // `index == Length - 1 ? previewPrice : Buffer[index + 1]`, so the newest sub-window drops
+    // its oldest committed close instead of sitting on top of a full one.
+    private previewRange(close: number): FractalRange | null {
+        if (!this.closes.full) return null;
+        let minimum = close;
+        let maximum = close;
+        for (let index = this.length - this.remaining + 1; index < this.length; index += 1) {
+            const value = this.closes.at(index) as number;
+            if (value < minimum) minimum = value;
+            if (value > maximum) maximum = value;
+        }
+        return Object.freeze({ minimum, maximum });
     }
 
     private restoreClose(close: number): void {

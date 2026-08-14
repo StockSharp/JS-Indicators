@@ -112,12 +112,15 @@ export declare const AdaptivePriceZoneIndicator: IndicatorDefinition<IndicatorCa
 // Public API module: calc/alligator.d.ts
 import { type IndicatorCandle, type IndicatorDefinition, type IndicatorProcessInput } from '../indicator-definition.js';
 import { SequentialIndicatorProcessor, type IndicatorCalculationResult } from '../sequential-processor.js';
-import { type SmoothedMovingAverageCheckpoint } from '../math/index.js';
+import { type RingBufferCheckpoint, type SmoothedMovingAverageCheckpoint } from '../math/index.js';
 import { AlligatorParameters } from './shared/shifted-sparse.js';
 export interface AlligatorCheckpoint {
     readonly jaw: SmoothedMovingAverageCheckpoint;
     readonly teeth: SmoothedMovingAverageCheckpoint;
     readonly lips: SmoothedMovingAverageCheckpoint;
+    readonly jawDelay: RingBufferCheckpoint<number>;
+    readonly teethDelay: RingBufferCheckpoint<number>;
+    readonly lipsDelay: RingBufferCheckpoint<number>;
 }
 export declare class AlligatorProcessor extends SequentialIndicatorProcessor<IndicatorCandle, AlligatorCheckpoint> {
     readonly jawLength: number;
@@ -129,8 +132,12 @@ export declare class AlligatorProcessor extends SequentialIndicatorProcessor<Ind
     private readonly jaw;
     private readonly teeth;
     private readonly lips;
+    private readonly jawDelay;
+    private readonly teethDelay;
+    private readonly lipsDelay;
     constructor(jawLength: number, jawShift: number, teethLength: number, teethShift: number, lipsLength: number, lipsShift: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
+    private line;
     protected resetState(): void;
     protected captureState(): AlligatorCheckpoint;
     protected restoreState(state: AlligatorCheckpoint): void;
@@ -1259,6 +1266,7 @@ export declare class FractalAdaptiveMovingAverageProcessor extends SequentialInd
     protected captureState(): FractalAdaptiveCheckpoint;
     protected restoreState(state: FractalAdaptiveCheckpoint): void;
     private delayedRange;
+    private previewRange;
     private restoreClose;
 }
 export declare const FractalAdaptiveMovingAverageIndicator: IndicatorDefinition<IndicatorCandle, AdaptiveLengthParameters>;
@@ -1547,7 +1555,7 @@ export declare const HurstExponentIndicator: IndicatorDefinition<IndicatorCandle
 // Public API module: calc/ichimoku.d.ts
 import { type IndicatorCandle, type IndicatorDefinition, type IndicatorParameters, type IndicatorProcessInput } from '../indicator-definition.js';
 import { SequentialIndicatorProcessor, type IndicatorCalculationResult } from '../sequential-processor.js';
-import { type RollingWindowCheckpoint } from '../math/index.js';
+import { type RingBufferCheckpoint, type RollingWindowCheckpoint } from '../math/index.js';
 export declare function parameter(values: IchimokuParameters, name: 'tenkanLength' | 'kijunLength' | 'senkouBLength', alias: 'tenkanPeriod' | 'kijunPeriod' | 'senkouBPeriod', fallback: number, maximum: number): number;
 export declare function lengthParameter(id: 'tenkanLength' | 'kijunLength' | 'senkouBLength' | 'chinkouLength', name: string, defaultValue: number, maximum: number): {
     readonly id: "chinkouLength" | "kijunLength" | "senkouBLength" | "tenkanLength";
@@ -1571,6 +1579,9 @@ export interface IchimokuCheckpoint {
     readonly kijunLow: RollingWindowCheckpoint;
     readonly senkouBHigh: RollingWindowCheckpoint;
     readonly senkouBLow: RollingWindowCheckpoint;
+    /** The spans held back for Kijun bars, which a preview reports and never adds to. */
+    readonly senkouADelay: RingBufferCheckpoint<number | null>;
+    readonly senkouBDelay: RingBufferCheckpoint<number | null>;
 }
 export declare class IchimokuProcessor extends SequentialIndicatorProcessor<IndicatorCandle, IchimokuCheckpoint> {
     readonly tenkanLength: number;
@@ -1583,6 +1594,8 @@ export declare class IchimokuProcessor extends SequentialIndicatorProcessor<Indi
     private readonly kijunLow;
     private readonly senkouBHigh;
     private readonly senkouBLow;
+    private readonly senkouADelay;
+    private readonly senkouBDelay;
     constructor(tenkanLength: number, kijunLength: number, senkouBLength: number, chinkouLength: number);
     protected calculate(input: IndicatorProcessInput<IndicatorCandle>, commit: boolean): IndicatorCalculationResult;
     protected resetState(): void;
@@ -1890,7 +1903,7 @@ export declare class KasePeakOscillatorProcessor extends SequentialIndicatorProc
     protected resetState(): void;
     protected captureState(): KasePeakOscillatorCheckpoint;
     protected restoreState(state: KasePeakOscillatorCheckpoint): void;
-    private nextBuffer;
+    private snapshot;
 }
 export declare const KasePeakOscillatorIndicator: IndicatorDefinition<IndicatorCandle, KasePeakOscillatorParameters>;
 
@@ -4929,6 +4942,7 @@ export declare class SimpleMovingAverage {
     get value(): number | null;
     push(value: NumericValue): number | null;
     preview(value: NumericValue): number | null;
+    previewReplacingLatest(value: NumericValue): number | null;
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;
@@ -5170,6 +5184,11 @@ export declare class RollingSum {
      * window holds one, rather than waiting for it to fill the way a commit's eviction does.
      */
     previewWithoutOldest(value: NumericValue): number | null;
+    /**
+     * StockSharp's `Buffer.Sum + (value - Buffer.Back())`: a preview that substitutes the newest
+     * committed sample rather than rolling the window, and only over a complete window.
+     */
+    previewReplacingLatest(value: NumericValue): number | null;
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;
@@ -5188,6 +5207,7 @@ export declare class RollingMinimum {
     push(value: NumericValue): number | null;
     preview(value: NumericValue): number | null;
     previewPartial(value: NumericValue): number | null;
+    previewWithoutOldest(value: NumericValue): number | null;
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;
@@ -5202,6 +5222,7 @@ export declare class RollingMaximum {
     push(value: NumericValue): number | null;
     preview(value: NumericValue): number | null;
     previewPartial(value: NumericValue): number | null;
+    previewWithoutOldest(value: NumericValue): number | null;
     reset(): void;
     checkpoint(): RollingWindowCheckpoint;
     restore(checkpoint: RollingWindowCheckpoint): void;

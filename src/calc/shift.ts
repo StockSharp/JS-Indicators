@@ -42,7 +42,10 @@ export class ShiftProcessor extends SequentialIndicatorProcessor<IndicatorCandle
     ): IndicatorCalculationResult {
         const value = input.index < this.length ? null : finite(input.value?.close);
         return {
-            isFormed: input.index >= this.length,
+            // `CalcIsFormed() => _left <= 0` is read before the `finally` that decrements `_left`,
+            // so the bar that empties the counter still answers empty while the platform already
+            // counts itself formed. Formation latches one bar ahead of the first value.
+            isFormed: input.index >= this.length - 1,
             values: [this.output('line', value, input.index)],
         };
     }

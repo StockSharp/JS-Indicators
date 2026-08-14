@@ -67,6 +67,41 @@ export function runtimeSeries(kind, candles, parameters, previewLast = false) {
 }
 
 /**
+ * The value each bar carries while it is still forming, for every bar in the series.
+ *
+ * `runtimeSeries(..., previewLast)` previews one bar and only ever the last, so the comparison it
+ * feeds reaches a preview whose windows are already full. StockSharp's preview arithmetic differs
+ * precisely while a buffer is filling -- its SMA answers `Buffer.SumNoFirst + value`, dropping a
+ * sample the committed path keeps -- so those bars need their own oracle. Each bar is previewed and
+ * then closed, which is the order a live chart produces them in.
+ */
+export function runtimeLivePreviews(kind, candles, parameters) {
+    const definition = getIndicatorDefinition(kind);
+    if (!definition) return null;
+
+    const runtime = new IndicatorRuntime({ definition, parameters });
+    const lines = new Map();
+    for (const output of runtime.outputs) lines.set(output.id, new Array(candles.length).fill(null));
+
+    for (let i = 0; i < candles.length; i += 1) {
+        const bar = candles[i];
+        const patch = runtime.update({ time: bar.time, value: bar }, false);
+        // Read off the patch rather than re-scanning points(): the platform records one value per
+        // Process call, and the patch is exactly that call's output. Scanning the whole point list
+        // once per bar would also make this quadratic over a series this long.
+        for (const op of patch.operations) {
+            if (op.point === undefined || op.point.sourceIndex !== i) continue;
+            const line = lines.get(op.outputId);
+            if (line) line[i] = op.point.value;
+        }
+        runtime.update({ time: bar.time, value: bar }, true);
+    }
+
+    if (lines.size === 1) return [...lines.values()][0];
+    return Object.fromEntries(lines);
+}
+
+/**
  * The oracle the incremental suites compare a step-by-step run against: the same indicator handed
  * the whole history at once.
  *

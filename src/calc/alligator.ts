@@ -14,7 +14,9 @@ import {
     type IndicatorCalculationResult,
 } from '../sequential-processor.js';
 import {
+    RingBuffer,
     SmoothedMovingAverage,
+    type RingBufferCheckpoint,
     type SmoothedMovingAverageCheckpoint,
 } from '../math/index.js';
 import {
@@ -22,6 +24,7 @@ import {
     alligatorParameterSchema,
     lineStyle,
     period,
+    validWindow,
 } from './shared/shifted-sparse.js';
 import {
     finite,
@@ -31,6 +34,9 @@ export interface AlligatorCheckpoint {
     readonly jaw: SmoothedMovingAverageCheckpoint;
     readonly teeth: SmoothedMovingAverageCheckpoint;
     readonly lips: SmoothedMovingAverageCheckpoint;
+    readonly jawDelay: RingBufferCheckpoint<number>;
+    readonly teethDelay: RingBufferCheckpoint<number>;
+    readonly lipsDelay: RingBufferCheckpoint<number>;
 }
 
 export class AlligatorProcessor extends SequentialIndicatorProcessor<
@@ -40,6 +46,9 @@ export class AlligatorProcessor extends SequentialIndicatorProcessor<
     private readonly jaw: SmoothedMovingAverage;
     private readonly teeth: SmoothedMovingAverage;
     private readonly lips: SmoothedMovingAverage;
+    private readonly jawDelay: RingBuffer<number>;
+    private readonly teethDelay: RingBuffer<number>;
+    private readonly lipsDelay: RingBuffer<number>;
 
     constructor(
         readonly jawLength: number,
@@ -59,6 +68,9 @@ export class AlligatorProcessor extends SequentialIndicatorProcessor<
         this.jaw = new SmoothedMovingAverage(jawLength);
         this.teeth = new SmoothedMovingAverage(teethLength);
         this.lips = new SmoothedMovingAverage(lipsLength);
+        this.jawDelay = new RingBuffer(jawShift + 1);
+        this.teethDelay = new RingBuffer(teethShift + 1);
+        this.lipsDelay = new RingBuffer(lipsShift + 1);
     }
 
     protected calculate(
@@ -68,40 +80,80 @@ export class AlligatorProcessor extends SequentialIndicatorProcessor<
         const high = finite(input.value?.high);
         const low = finite(input.value?.low);
         const median = high === null || low === null ? null : (high + low) / 2;
-        const jaw = commit ? this.jaw.push(median) : this.jaw.preview(median);
-        const teeth = commit ? this.teeth.push(median) : this.teeth.preview(median);
-        const lips = commit ? this.lips.push(median) : this.lips.preview(median);
+        const jaw = this.line(this.jaw, this.jawDelay, this.jawShift, median, commit);
+        const teeth = this.line(this.teeth, this.teethDelay, this.teethShift, median, commit);
+        const lips = this.line(this.lips, this.lipsDelay, this.lipsShift, median, commit);
         const values: IndicatorOutputValue[] = [];
+        // A commit reports the average of the bar it just closed, drawn `shift` bars ahead. A
+        // preview reports an average committed `shift` bars ago, which already belongs to the bar
+        // being previewed -- the shift is spent, so it is not applied a second time.
+        const shifted = (shift: number) => (commit ? input.index + shift : input.index);
         if (input.index >= this.jawLength - 1)
-            values.push(this.formedOutput('jaw', jaw, this.jaw.isFormed, input.index + this.jawShift));
+            values.push(this.formedOutput('jaw', jaw, this.jaw.isFormed, shifted(this.jawShift)));
         if (input.index >= this.teethLength - 1)
-            values.push(this.formedOutput('teeth', teeth, this.teeth.isFormed, input.index + this.teethShift));
+            values.push(this.formedOutput('teeth', teeth, this.teeth.isFormed, shifted(this.teethShift)));
         if (input.index >= this.lipsLength - 1)
-            values.push(this.formedOutput('lips', lips, this.lips.isFormed, input.index + this.lipsShift));
+            values.push(this.formedOutput('lips', lips, this.lips.isFormed, shifted(this.lipsShift)));
         return {
             isFormed: this.jaw.isFormed,
             values,
         };
     }
 
+    // One line's answer on both paths. A commit feeds its average into the buffer that
+    // `AlligatorLine.Buffer` is; the caller draws it `shift` bars ahead. A forming bar feeds it
+    // nothing: StockSharp discards the average computed for such a bar and answers `Buffer[1]`,
+    // the average already committed for the bar being previewed, and only while
+    // `Buffer.Count > Shift` -- so the first point of a shifted line appears when its bar closes.
+    private line(
+        average: SmoothedMovingAverage,
+        delay: RingBuffer<number>,
+        shift: number,
+        median: number | null,
+        commit: boolean,
+    ): number | null {
+        if (!commit) {
+            // Shift 0 has no committed average standing in for the forming bar -- StockSharp
+            // rejects Shift < 1 -- so an unshifted line previews itself, like every average here.
+            if (shift === 0) return average.preview(median);
+            return delay.size > shift ? (delay.at(1) ?? null) : null;
+        }
+        const value = average.push(median);
+        if (value !== null && average.isFormed) delay.push(value);
+        return value;
+    }
+
     protected resetState(): void {
         this.jaw.reset();
         this.teeth.reset();
         this.lips.reset();
+        this.jawDelay.clear();
+        this.teethDelay.clear();
+        this.lipsDelay.clear();
     }
     protected captureState(): AlligatorCheckpoint {
         return Object.freeze({
             jaw: this.jaw.checkpoint(),
             teeth: this.teeth.checkpoint(),
             lips: this.lips.checkpoint(),
+            jawDelay: this.jawDelay.checkpoint(),
+            teethDelay: this.teethDelay.checkpoint(),
+            lipsDelay: this.lipsDelay.checkpoint(),
         });
     }
     protected restoreState(state: AlligatorCheckpoint): void {
-        if (state === null || typeof state !== 'object')
+        if (state === null || typeof state !== 'object'
+            || !validWindow(state.jawDelay, this.jawShift + 1)
+            || !validWindow(state.teethDelay, this.teethShift + 1)
+            || !validWindow(state.lipsDelay, this.lipsShift + 1)) {
             throw new TypeError('sschart: invalid Alligator checkpoint');
+        }
         this.jaw.restore(state.jaw);
         this.teeth.restore(state.teeth);
         this.lips.restore(state.lips);
+        this.jawDelay.restore(state.jawDelay);
+        this.teethDelay.restore(state.teethDelay);
+        this.lipsDelay.restore(state.lipsDelay);
     }
 }
 

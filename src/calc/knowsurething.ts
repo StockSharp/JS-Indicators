@@ -78,7 +78,9 @@ export class KnowSureThingProcessor extends SequentialIndicatorProcessor<
         ));
         integer(signalLength, signalLength, 1, 500, 'signalLength');
         this.rocLengths = Object.freeze(rocLengths);
-        this.closes = new RingBuffer<number | null>(Math.max(...rocLengths));
+        // One slot past the longest ROC: Momentum's buffer is `Length + 1` deep because a preview
+        // reads a `Buffer[0]` the commit has not rolled yet -- one sample older than the commit's.
+        this.closes = new RingBuffer<number | null>(Math.max(...rocLengths) + 1);
         this.averages = Object.freeze(smaLengths.map((length) => (
             new SimpleMovingAverage(length)
         )));
@@ -91,11 +93,12 @@ export class KnowSureThingProcessor extends SequentialIndicatorProcessor<
     ): IndicatorCalculationResult {
         const current = finite(input.value?.close);
         const rocs = this.rocLengths.map((length) => {
+            // Momentum pushes only on a final input, so a preview subtracts a base one sample
+            // further back than the commit for the same bar reaches for.
+            const offset = this.closes.size - length - (commit ? 0 : 1);
             const previous = this.closes.size === 0
                 ? current
-                : this.closes.size < length
-                    ? (this.closes.front() ?? null)
-                    : (this.closes.at(this.closes.size - length) ?? null);
+                : ((offset > 0 ? this.closes.at(offset) : this.closes.front()) ?? null);
             return current !== null && previous !== null && previous !== 0
                 ? finite((current - previous) / previous * 100)
                 : null;

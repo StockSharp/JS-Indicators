@@ -84,6 +84,23 @@ export class RollingSum {
         return sum + (incoming ?? 0);
     }
 
+    /**
+     * StockSharp's `Buffer.Sum + (value - Buffer.Back())`: a preview that substitutes the newest
+     * committed sample rather than rolling the window, and only over a complete window.
+     */
+    previewReplacingLatest(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        const latest = this.buffer.size > 0 ? this.buffer.at(this.buffer.size - 1) : undefined;
+        const nextInvalid = this.invalid
+            - (latest === null ? 1 : 0)
+            + (incoming === null ? 1 : 0);
+        if (!this.buffer.full || nextInvalid !== 0) return null;
+        let sum = 0;
+        for (let index = 0; index < this.buffer.size - 1; index += 1)
+            sum += this.buffer.at(index) ?? 0;
+        return sum + (incoming ?? 0);
+    }
+
     reset(): void {
         this.buffer.clear();
         this.sum = 0;
@@ -194,20 +211,36 @@ class RollingExtrema {
         return this.previewValue(value, false);
     }
 
+    /**
+     * StockSharp's `_buffer.Skip(1).Append(value)`: the forming bar takes the oldest sample's
+     * place instead of standing on top of a full window, so the extremum spans Length prices
+     * rather than Length + 1. Ichimoku's lines read their window this way; `Highest` does not.
+     */
+    previewWithoutOldest(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        const oldest = this.buffer.size > 0 ? this.buffer.at(0) : undefined;
+        const nextInvalid = this.invalid
+            - (oldest === null ? 1 : 0)
+            + (incoming === null ? 1 : 0);
+        if (incoming === null || nextInvalid !== 0) return null;
+        let result = incoming;
+        for (let index = 1; index < this.buffer.size; index += 1) {
+            const sample = this.buffer.at(index) as number;
+            if (this.minimum ? sample < result : sample > result) result = sample;
+        }
+        return result;
+    }
+
+    // A preview does not roll the window. StockSharp answers `high.Max(Buffer.Max)` on a non-final
+    // input, and the buffer it reads is the committed one -- nothing was pushed, so nothing was
+    // evicted. The bar being previewed therefore sits on top of a full window rather than in place
+    // of its oldest sample, and the extremum is taken over Length + 1 prices.
     private previewValue(value: NumericValue, requireFull: boolean): number | null {
         const incoming = numeric(value);
-        const outgoing = this.buffer.full ? (this.buffer.front() ?? null) : null;
-        const nextSize = Math.min(this.windowLength, this.buffer.size + 1);
-        const nextInvalid = this.invalid
-            - (this.buffer.full && outgoing === null ? 1 : 0)
-            + (incoming === null ? 1 : 0);
-        if ((requireFull && nextSize !== this.windowLength) || nextInvalid !== 0) return null;
+        const nextInvalid = this.invalid + (incoming === null ? 1 : 0);
+        if ((requireFull && !this.buffer.full) || nextInvalid !== 0) return null;
 
-        const threshold = this.nextIndex - this.windowLength;
-        let candidate = this.dequeHead;
-        while (candidate < this.deque.length && this.deque[candidate].index <= threshold)
-            candidate += 1;
-        const current = this.deque[candidate]?.value;
+        const current = this.deque[this.dequeHead]?.value;
         if (incoming === null) return current ?? null;
         if (current === undefined) return incoming;
         return this.minimum ? Math.min(current, incoming) : Math.max(current, incoming);
@@ -253,6 +286,9 @@ export class RollingMinimum {
     previewPartial(value: NumericValue): number | null {
         return this.extrema.previewPartial(value);
     }
+    previewWithoutOldest(value: NumericValue): number | null {
+        return this.extrema.previewWithoutOldest(value);
+    }
     reset(): void { this.extrema.reset(); }
     checkpoint(): RollingWindowCheckpoint { return this.extrema.checkpoint(); }
     restore(checkpoint: RollingWindowCheckpoint): void { this.extrema.restore(checkpoint); }
@@ -270,6 +306,9 @@ export class RollingMaximum {
     preview(value: NumericValue): number | null { return this.extrema.preview(value); }
     previewPartial(value: NumericValue): number | null {
         return this.extrema.previewPartial(value);
+    }
+    previewWithoutOldest(value: NumericValue): number | null {
+        return this.extrema.previewWithoutOldest(value);
     }
     reset(): void { this.extrema.reset(); }
     checkpoint(): RollingWindowCheckpoint { return this.extrema.checkpoint(); }

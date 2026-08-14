@@ -109,13 +109,24 @@ Charts, and remember to unlink before trusting a green Charts run.
   zero price, down only, flat plateau, ties, steps). Both axes are driven off what the platform
   reports an indicator has, so a new indicator or a new parameter is covered without being
   listed anywhere.
-- **What that scan still does not reach is the forming bar.** Previews are compared at default
-  parameters only, and only on probes appended after a long series -- by which point every
-  window is full and every indicator formed long ago. Five divergences lived in that gap at
-  once: three indicators counted the forming bar towards their own formation and drew a point a
-  bar early, one measured a rolling base from the wrong slot on every preview, and one previewed
-  a moving average without dropping the sample the platform drops. So when you touch a preview
-  path, read the C# and pin it with a unit test. A green suite is not evidence there.
+- **The forming bar is compared on every bar, and it is where the port keeps going wrong.**
+  `numeric-parity`'s live-preview check drives each indicator the way a chart does -- preview the
+  bar, then close it -- and compares against a C# run doing the same. It replaced a probe appended
+  after the whole series, which only ever met full windows and long-formed indicators; 84 of 245
+  lines diverged the day it was written, none of which the rest of the suite could see. Three
+  rules cover almost all of it, and the platform never breaks them:
+  - **Nothing is pushed on a non-final input.** So an indicator cannot *become* formed on a
+    preview -- formation is read off committed state alone, and `SequentialIndicatorProcessor`
+    enforces that centrally. If your indicator draws its first point a bar early, this is why.
+  - **A window is not rolled by a preview.** `Highest` answers `high.Max(Buffer.Max)` over the
+    whole committed buffer, so the forming bar sits *on top* of a full window and the extremum
+    spans Length + 1 prices. Evicting the oldest is a commit-only step.
+  - **A shifted line answers from its own buffer.** `AlligatorLine` discards the average it just
+    computed for a forming bar and returns `Buffer[1]` -- a value committed `Shift` bars ago,
+    which already belongs to the bar being previewed. Ichimoku's spans do the same.
+
+  Read the C# for the preview path separately from the committed one; the two rarely share code
+  there. `parity-scan` still covers only committed values, so it is not evidence about previews.
 - **A flat window is the case to check first.** Most of what the scan caught was one mistake in
   different costumes: a window where every price is identical makes ranges and deviations zero,
   and the platform emits no value there. Inventing one (0, -100, "bottom of the range") is wrong,

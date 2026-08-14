@@ -181,7 +181,10 @@ export class ZigZagFamilyProcessor extends SequentialIndicatorProcessor<
             : input.index - shift;
         const values = accepted
             ? [this.output('value', lastExtremum, targetIndex)]
-            : [];
+            // The platform answers every formed bar with a ZigZagIndicatorValue -- empty on the
+            // bars with no reversal -- so say the same here. A bar that contributes no entry at all
+            // never marks the line formed, and the preview of the first reversal draws nothing.
+            : [this.output('value', null, input.index)];
         if (changed) {
             isUpTrend = !isUpTrend;
             lastExtremum = price;

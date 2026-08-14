@@ -63,17 +63,22 @@ export class BollingerBandsProcessor extends SequentialIndicatorProcessor<
     ): IndicatorCalculationResult {
         const close = finite(input.value?.close);
         const middle = commit ? this.average.push(close) : this.average.preview(close);
-        const deviation = commit ? this.deviation.push(close) : this.deviation.preview(close);
-        const formed = middle !== null && deviation !== null;
+        // A band answers `_ma.GetCurrentValue() + Width * _dev.GetCurrentValue()`, and
+        // GetCurrentValue reads the indicator container, which a non-final input is never added
+        // to. A previewed band therefore quotes the last committed average and deviation, while
+        // the middle line is the moving average's own preview.
+        const bandBase = commit ? middle : this.average.value;
+        const deviation = commit ? this.deviation.push(close) : this.deviation.value;
+        const formed = bandBase !== null && deviation !== null;
         const symmetricOverride = this.width !== 2;
         const upperWidth = symmetricOverride ? this.width : this.upBandWidth;
         const lowerWidth = symmetricOverride ? -this.width : this.lowBandWidth;
         return {
             isFormed: this.average.isFormed,
             values: [
-                this.formedOutput('upper', formed ? middle + upperWidth * deviation : null, formed, input.index),
+                this.formedOutput('upper', formed ? bandBase + upperWidth * deviation : null, formed, input.index),
                 this.formedOutput('middle', middle, this.average.isFormed, input.index),
-                this.formedOutput('lower', formed ? middle + lowerWidth * deviation : null, formed, input.index),
+                this.formedOutput('lower', formed ? bandBase + lowerWidth * deviation : null, formed, input.index),
             ],
         };
     }

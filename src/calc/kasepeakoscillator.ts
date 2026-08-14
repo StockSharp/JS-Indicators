@@ -73,7 +73,9 @@ export class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<
         const high = finite(input.value?.high);
         const low = finite(input.value?.low);
         const close = finite(input.value?.close);
-        if (input.index < atrFormedFrom || averageTrueRange === null
+        // The gate is `_atr.IsFormed`, and the ATR buffer only grows on a final input: a forming
+        // bar sees one sample fewer, so the branch opens for a preview one bar later.
+        if (input.index < (commit ? atrFormedFrom : atrFormedFrom + 1) || averageTrueRange === null
             || high === null || low === null || close === null) {
             return {
                 isFormed: false,
@@ -96,11 +98,18 @@ export class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<
             }
         }
 
-        const peaks = this.nextBuffer(this.peaks, peak, commit);
-        const valleys = this.nextBuffer(this.valleys, valley, commit);
-        if (commit) this.previousClose = close;
-        const maximumPeak = Math.max(...peaks);
-        const minimumValley = Math.min(...valleys);
+        if (commit) {
+            this.peaks.push(peak);
+            this.valleys.push(valley);
+            this.previousClose = close;
+        }
+        const peaks = this.snapshot(this.peaks);
+        const valleys = this.snapshot(this.valleys);
+        // A preview rolls neither buffer. StockSharp folds the forming bar into the committed
+        // extremes -- `_peakBuffer.Max.Value.Max(peak)` -- while the long-term denominator keeps
+        // reading `_peakBuffer[0]`, one bar further back than a commit would have left it.
+        const maximumPeak = commit ? Math.max(...peaks) : Math.max(...peaks, peak);
+        const minimumValley = commit ? Math.min(...valleys) : Math.min(...valleys, valley);
         const shortDenominator = maximumPeak - minimumValley;
         const longDenominator = peaks[0] - valleys[0];
         const shortValue = shortDenominator === 0
@@ -156,16 +165,11 @@ export class KasePeakOscillatorProcessor extends SequentialIndicatorProcessor<
         this.previousClose = state.previousClose;
     }
 
-    private nextBuffer(buffer: RingBuffer<number>, value: number, commit: boolean): number[] {
-        if (commit) buffer.push(value);
+    private snapshot(buffer: RingBuffer<number>): number[] {
         const values: number[] = [];
         for (let index = 0; index < buffer.size; index += 1) {
             const current = buffer.at(index);
             if (current !== undefined) values.push(current);
-        }
-        if (!commit) {
-            if (values.length >= 2) values.shift();
-            values.push(value);
         }
         return values;
     }

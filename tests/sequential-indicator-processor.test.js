@@ -61,9 +61,14 @@ describe('SequentialIndicatorProcessor', () => {
         assert.equal(secondPreview.values[0].value, null);
         assert.equal(processor.process(input(0, 3, true)).values[0].value, null);
         assert.equal(processor.position, 1);
-        assert.equal(processor.process(input(1, 4, false)).values[0].value, 7);
+        // A preview is never the bar an indicator forms on. The platform pushes into its buffer only
+        // on a final input, so the sample that would complete the window is not in it yet.
+        assert.equal(processor.process(input(1, 4, false)).values[0].value, null);
         assert.equal(processor.position, 1);
         assert.equal(processor.process(input(1, 4, true)).values[0].value, 7);
+        assert.equal(processor.position, 2);
+        // Once a commit has formed it, previews answer again without advancing.
+        assert.equal(processor.process(input(2, 5, false)).values[0].value, 12);
         assert.equal(processor.position, 2);
     });
 
@@ -124,8 +129,12 @@ describe('SequentialIndicatorProcessor', () => {
         assert.deepEqual(third.values.map((value) => value.value), [4, 8]);
 
         processor.restore(checkpoint);
+        // Restored to a state where only 'fast' had formed. A preview cannot form 'slow' -- the
+        // latch is what a preview reads, and only a commit writes it.
         const replayed = processor.process(input(2, 5, false));
-        assert.deepEqual(replayed.values.map((value) => value.value), [5, 10]);
+        assert.deepEqual(replayed.values.map((value) => value.value), [5, null]);
+        const committed = processor.process(input(2, 5, true));
+        assert.deepEqual(committed.values.map((value) => value.value), [5, 10]);
     });
 
     it('rejects gaps, malformed values and undeclared or duplicate outputs', () => {
@@ -160,7 +169,8 @@ describe('SequentialIndicatorProcessor', () => {
 
     it('owns flat immutable output metadata and rejects ambiguous painter fields', () => {
         const source = { up: true, label: 'buy', weight: 2, optional: null };
-        const result = new MetadataProcessor(source).process(input(0, -7, false));
+        // Final, because a preview masks the value it would carry the metadata for.
+        const result = new MetadataProcessor(source).process(input(0, -7, true));
         source.up = false;
 
         assert.deepEqual(result.values[0], {

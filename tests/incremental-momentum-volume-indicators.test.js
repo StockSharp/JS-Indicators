@@ -123,18 +123,20 @@ describe('incremental momentum and volume indicators', () => {
             low: index + 1,
             close: index + 1,
         });
-        for (let index = 0; index < 3; index += 1) {
+        // Committed past formation first: a preview reads the formation a commit left behind, so
+        // previewing on the bar that would form it would test the mask rather than the flat range.
+        for (let index = 0; index < 4; index += 1) {
             processor.process({
                 index, time: index + 1, value: candle(index), isFinal: true,
             });
         }
         const preview = processor.process({
-            index: 3, time: 4, value: candle(3), isFinal: false,
+            index: 4, time: 5, value: candle(4), isFinal: false,
         });
         assert.equal(preview.values[0].value, 0);
-        assert.equal(processor.position, 3);
+        assert.equal(processor.position, 4);
         assert.equal(processor.process({
-            index: 3, time: 4, value: candle(3), isFinal: true,
+            index: 4, time: 5, value: candle(4), isFinal: true,
         }).values[0].value, 0);
     });
 

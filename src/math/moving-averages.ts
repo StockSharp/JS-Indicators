@@ -32,6 +32,10 @@ export class SimpleMovingAverage {
         const sum = this.sum.previewWithoutOldest(value);
         return sum === null ? null : sum / this.windowLength;
     }
+    previewReplacingLatest(value: NumericValue): number | null {
+        const sum = this.sum.previewReplacingLatest(value);
+        return sum === null ? null : sum / this.windowLength;
+    }
     reset(): void { this.sum.reset(); }
     checkpoint(): RollingWindowCheckpoint { return this.sum.checkpoint(); }
     restore(checkpoint: RollingWindowCheckpoint): void { this.sum.restore(checkpoint); }

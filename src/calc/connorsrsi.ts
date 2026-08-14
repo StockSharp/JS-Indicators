@@ -189,9 +189,12 @@ export class ConnorsRsiProcessor extends SequentialIndicatorProcessor<
             this.streakPrevious = streak;
         }
 
+        // ROC divides by `Buffer[0]`, and Momentum pushes on a final input only: a preview reads
+        // the committed buffer whole, so its base sits one slot further back than a commit leaves.
         let base: number | null | undefined;
         if (this.rocHistory.size === 0) base = close;
-        else if (this.rocHistory.size <= this.rocRSIPeriod) base = this.rocHistory.front();
+        else if (!commit || this.rocHistory.size <= this.rocRSIPeriod)
+            base = this.rocHistory.front();
         else base = this.rocHistory.at(this.rocHistory.size - this.rocRSIPeriod);
         const roc = close !== null && typeof base === 'number' && base !== 0
             ? finite((close - base) / base * 100)
