@@ -65,8 +65,9 @@ export class PartialRelativeStrengthIndex {
             || typeof state.initialized !== 'boolean'
             || (state.previous !== null && finite(state.previous) === null)
             || (state.previousResult !== null && finite(state.previousResult) === null)
-            || state.gain?.count !== state.loss?.count
-            || (!state.initialized && (state.previous !== null || state.gain?.count !== 0))) {
+            || state.gain?.seed?.values?.length !== state.loss?.seed?.values?.length
+            || (!state.initialized
+                && (state.previous !== null || state.gain?.seed?.values?.length !== 0))) {
             throw new TypeError('sschart: invalid partial RSI checkpoint');
         }
         const gain = new SmoothedMovingAverage(this.length);

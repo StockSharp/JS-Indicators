@@ -135,7 +135,9 @@ describe('incremental indicator math kernel', () => {
         const finite = new FiniteExponentialAverage(3);
         assert.deepEqual([3, 6].map((value) => finite.push(value)), [1, 3]);
         assert.equal(finite.isFormed, false);
-        assert.equal(finite.preview(9), 6);
+        // The third copy of the platform's EMA seeds a warm-up preview the same way the other
+        // two do, off SumNoFirst: (9 - 3 + 9) / 3.
+        assert.equal(finite.preview(9), 5);
         assert.equal(finite.isFormed, false);
         assert.equal(finite.push(9), 6);
         assert.equal(finite.isFormed, true);
@@ -170,7 +172,8 @@ describe('incremental indicator math kernel', () => {
         assert.deepEqual([3, 6].map((value) => average.push(value)), [1, 3]);
         const checkpoint = average.checkpoint();
         assert.equal(average.isFormed, false);
-        assert.equal(average.preview(9), 6);
+        // A warm-up preview seeds off SumNoFirst, which drops the 3: (9 - 3 + 9) / 3.
+        assert.equal(average.preview(9), 5);
         assert.deepEqual(average.checkpoint(), checkpoint);
         assert.equal(average.push(Number.NaN), null);
         assert.equal(average.push(9), 6);
@@ -185,7 +188,9 @@ describe('incremental indicator math kernel', () => {
         assert.equal(rsi.push(100), null);
         closeTo(rsi.push(101), 100);
         const checkpoint = rsi.checkpoint();
-        closeTo(rsi.preview(99), 100 / 3);
+        // Both smoothed averages preview off SumNoFirst, so the single gain of 1 is dropped:
+        // gain (1 - 1 + 0) / 3 = 0, loss (0 - 0 + 2) / 3, and 100 * 0 / (0 + 2/3) is zero.
+        closeTo(rsi.preview(99), 0);
         assert.deepEqual(rsi.checkpoint(), checkpoint);
         closeTo(rsi.push(102), 100);
         assert.equal(rsi.isFormed, false);
@@ -296,7 +301,8 @@ describe('incremental indicator math kernel', () => {
         assert.deepEqual([3, 6].map((value) => average.push(value)), [1, 3]);
         const checkpoint = average.checkpoint();
         assert.equal(average.isFormed, false);
-        assert.equal(average.preview(9), 6);
+        // Same SumNoFirst seed as the EMA: (9 - 3 + 9) / 3.
+        assert.equal(average.preview(9), 5);
         assert.deepEqual(average.checkpoint(), checkpoint);
         assert.equal(average.value, 3);
         assert.equal(average.push(9), 6);

@@ -156,8 +156,10 @@ export class TrueStrengthIndexProcessor extends SequentialIndicatorProcessor<
             || typeof state.initialized !== 'boolean'
             || (state.previousClose !== null && finite(state.previousClose) === null)
             || (!state.initialized && state.previousClose !== null)
-            || state.firstMomentum?.count !== state.firstAbsoluteMomentum?.count
-            || state.doubleMomentum?.count !== state.doubleAbsoluteMomentum?.count) {
+            || state.firstMomentum?.seed?.values?.length
+                !== state.firstAbsoluteMomentum?.seed?.values?.length
+            || state.doubleMomentum?.seed?.values?.length
+                !== state.doubleAbsoluteMomentum?.seed?.values?.length) {
             throw new TypeError('sschart: invalid True Strength Index checkpoint');
         }
         this.firstMomentum.restore(state.firstMomentum);

@@ -87,9 +87,9 @@ export class MassIndexProcessor extends SequentialIndicatorProcessor<
             const single = this.single.preview(range);
             const double = this.double.preview(single);
             const singleFormed = this.single.isFormed
-                || singleState.count + 1 === this.emaLength;
+                || singleState.seed.values.length + 1 === this.emaLength;
             const doubleFormed = this.double.isFormed
-                || doubleState.count + 1 === this.emaLength;
+                || doubleState.seed.values.length + 1 === this.emaLength;
             if (singleFormed && doubleFormed
                 && single !== null && double !== null && double !== 0) {
                 ratio = finite(single / double);

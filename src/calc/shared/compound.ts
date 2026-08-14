@@ -6,6 +6,8 @@ import {
     type IndicatorParameters,
 } from '../../indicator-definition.js';
 import {
+    RingBuffer,
+    type RingBufferCheckpoint,
     type RollingWindowCheckpoint,
 } from '../../math/index.js';
 import {
@@ -38,100 +40,73 @@ export interface DonchianChannelsCheckpoint {
 }
 
 export interface FiniteExponentialCheckpoint {
-    readonly count: number;
-    readonly seedSum: number;
-    readonly formed: boolean;
+    readonly seed: RingBufferCheckpoint<number>;
     readonly previous: number;
 }
 
 export class FiniteExponentialAverage {
-    private count = 0;
+    // The seed values themselves, not just their sum: a warm-up preview has to answer with the
+    // oldest one already dropped, which a running total cannot be asked for.
+    private readonly seed: RingBuffer<number>;
     private seedSum = 0;
-    private formed = false;
     private previous = 0;
     private readonly multiplier: number;
 
     constructor(readonly length: number) {
         integer(length, length, 1, 10_000, 'EMA length');
+        this.seed = new RingBuffer(length);
         this.multiplier = 2 / (length + 1);
     }
 
-    get isFormed(): boolean { return this.formed; }
+    get isFormed(): boolean { return this.seed.full; }
 
     push(value: number | null): number | null {
-        const next = this.evaluate(value);
-        this.count = next.count;
-        this.seedSum = next.seedSum;
-        this.formed = next.formed;
-        this.previous = next.previous;
-        return next.value;
+        if (value === null) return null;
+        if (!this.seed.full) {
+            this.seed.push(value);
+            this.seedSum += value;
+            this.previous = this.seedSum / this.length;
+            return this.previous;
+        }
+        this.previous = (value - this.previous) * this.multiplier + this.previous;
+        return this.previous;
     }
 
-    preview(value: number | null): number | null { return this.evaluate(value).value; }
+    preview(value: number | null): number | null {
+        if (value === null) return null;
+        if (!this.seed.full) return (this.seedNoOldest() + value) / this.length;
+        return (value - this.previous) * this.multiplier + this.previous;
+    }
 
     reset(): void {
-        this.count = 0;
+        this.seed.clear();
         this.seedSum = 0;
-        this.formed = false;
         this.previous = 0;
     }
 
     checkpoint(): FiniteExponentialCheckpoint {
         return Object.freeze({
-            count: this.count,
-            seedSum: this.seedSum,
-            formed: this.formed,
+            seed: this.seed.checkpoint(),
             previous: this.previous,
         });
     }
 
     restore(state: FiniteExponentialCheckpoint): void {
         if (state === null || typeof state !== 'object'
-            || !Number.isInteger(state.count) || state.count < 0 || state.count > this.length
-            || finite(state.seedSum) === null || typeof state.formed !== 'boolean'
-            || finite(state.previous) === null
-            || state.formed !== (state.count === this.length)) {
+            || !Array.isArray(state.seed?.values)
+            || state.seed.values.length > this.length
+            || state.seed.values.some((seeded) => finite(seeded) === null)
+            || finite(state.previous) === null) {
             throw new TypeError('sschart: invalid finite EMA checkpoint');
         }
-        this.count = state.count;
-        this.seedSum = state.seedSum;
-        this.formed = state.formed;
+        this.seed.restore(state.seed);
+        this.seedSum = state.seed.values.reduce((sum, seeded) => sum + seeded, 0);
         this.previous = state.previous;
     }
 
-    private evaluate(value: number | null): FiniteExponentialCheckpoint & {
-        readonly value: number | null;
-    } {
-        if (value === null) {
-            return {
-                count: this.count,
-                seedSum: this.seedSum,
-                formed: this.formed,
-                previous: this.previous,
-                value: null,
-            };
-        }
-        if (!this.formed) {
-            const count = this.count + 1;
-            const seedSum = this.seedSum + value;
-            const formed = count === this.length;
-            const previous = seedSum / this.length;
-            return {
-                count,
-                seedSum,
-                formed,
-                previous,
-                value: previous,
-            };
-        }
-        const previous = (value - this.previous) * this.multiplier + this.previous;
-        return {
-            count: this.count,
-            seedSum: this.seedSum,
-            formed: true,
-            previous,
-            value: previous,
-        };
+    /** StockSharp's `Buffer.SumNoFirst`: zero for an empty window, the oldest dropped otherwise. */
+    private seedNoOldest(): number {
+        return this.seed.size === 0 ? 0 : this.seedSum - (this.seed.front() as number);
     }
 }
 

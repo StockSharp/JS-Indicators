@@ -97,8 +97,15 @@ export class VidyaProcessor extends SequentialIndicatorProcessor<
         const total = upSum + downSum;
         const cmo = total === 0 ? 0 : 100 * (upSum - downSum) / total;
         if (!this.seed.full) {
-            const value = (this.seedSum + close) / this.length;
-            const formed = this.seed.size + 1 >= this.length;
+            // A preview seeds off Buffer.SumNoFirst, which drops the oldest price even while the
+            // window is still filling; a commit keeps it and evicts nothing.
+            const seedSum = commit || this.seed.size === 0
+                ? this.seedSum
+                : this.seedSum - (this.seed.front() as number);
+            const value = (seedSum + close) / this.length;
+            // Only a committed close fills the platform's buffer, so a preview cannot be the bar
+            // that forms the indicator.
+            const formed = commit && this.seed.size + 1 >= this.length;
             if (commit) {
                 this.seed.push(close);
                 this.seedSum += close;

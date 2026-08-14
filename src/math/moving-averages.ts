@@ -94,105 +94,76 @@ export class PartialSeedSimpleMovingAverage {
 }
 
 export interface PartialSeedExponentialMovingAverageCheckpoint {
-    readonly count: number;
-    readonly seedSum: number;
-    readonly formed: boolean;
+    readonly seed: RingBufferCheckpoint<number>;
     readonly previous: number;
 }
 
 /** StockSharp EMA values, including partial `seedSum / length` warm-up output. */
 export class PartialSeedExponentialMovingAverage {
-    private count = 0;
+    // The seed values themselves, not just their sum: a warm-up preview has to answer with the
+    // oldest one already dropped, which a running total cannot be asked for.
+    private readonly seed: RingBuffer<number>;
     private seedSum = 0;
-    private formed = false;
     private previous = 0;
     private readonly multiplier: number;
 
     constructor(readonly windowLength: number) {
-        length(windowLength);
+        this.seed = new RingBuffer(length(windowLength));
         this.multiplier = 2 / (windowLength + 1);
     }
 
-    get isFormed(): boolean { return this.formed; }
-    get value(): number | null { return this.count === 0 ? null : this.previous; }
+    get isFormed(): boolean { return this.seed.full; }
+    get value(): number | null { return this.seed.size === 0 ? null : this.previous; }
 
     push(value: NumericValue): number | null {
-        const next = this.evaluate(value);
-        if (next.value === null) return null;
-        this.count = next.count;
-        this.seedSum = next.seedSum;
-        this.formed = next.formed;
-        this.previous = next.previous;
-        return next.value;
+        const incoming = numeric(value);
+        if (incoming === null) return null;
+        if (!this.seed.full) {
+            this.seed.push(incoming);
+            this.seedSum += incoming;
+            this.previous = this.seedSum / this.windowLength;
+            return this.previous;
+        }
+        this.previous = (incoming - this.previous) * this.multiplier + this.previous;
+        return this.previous;
     }
 
-    preview(value: NumericValue): number | null { return this.evaluate(value).value; }
+    preview(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        if (incoming === null) return null;
+        if (!this.seed.full) return (this.seedNoOldest() + incoming) / this.windowLength;
+        return (incoming - this.previous) * this.multiplier + this.previous;
+    }
 
     reset(): void {
-        this.count = 0;
+        this.seed.clear();
         this.seedSum = 0;
-        this.formed = false;
         this.previous = 0;
     }
 
     checkpoint(): PartialSeedExponentialMovingAverageCheckpoint {
         return Object.freeze({
-            count: this.count,
-            seedSum: this.seedSum,
-            formed: this.formed,
+            seed: this.seed.checkpoint(),
             previous: this.previous,
         });
     }
 
     restore(state: PartialSeedExponentialMovingAverageCheckpoint): void {
         if (state === null || typeof state !== 'object'
-            || !Number.isInteger(state.count) || state.count < 0
-            || state.count > this.windowLength
-            || numeric(state.seedSum) === null
-            || typeof state.formed !== 'boolean'
-            || state.formed !== (state.count === this.windowLength)
+            || !Array.isArray(state.seed?.values)
+            || state.seed.values.length > this.windowLength
+            || state.seed.values.some((seeded) => numeric(seeded) === null)
             || numeric(state.previous) === null) {
             throw new TypeError('sschart: invalid partial-seed exponential average checkpoint');
         }
-        this.count = state.count;
-        this.seedSum = state.seedSum;
-        this.formed = state.formed;
+        this.seed.restore(state.seed);
+        this.seedSum = state.seed.values.reduce((sum, seeded) => sum + seeded, 0);
         this.previous = state.previous;
     }
 
-    private evaluate(value: NumericValue): PartialSeedExponentialMovingAverageCheckpoint & {
-        readonly value: number | null;
-    } {
-        const incoming = numeric(value);
-        if (incoming === null) {
-            return {
-                count: this.count,
-                seedSum: this.seedSum,
-                formed: this.formed,
-                previous: this.previous,
-                value: null,
-            };
-        }
-        if (!this.formed) {
-            const count = this.count + 1;
-            const seedSum = this.seedSum + incoming;
-            const previous = seedSum / this.windowLength;
-            return {
-                count,
-                seedSum,
-                formed: count === this.windowLength,
-                previous,
-                value: previous,
-            };
-        }
-        const previous = (incoming - this.previous) * this.multiplier + this.previous;
-        return {
-            count: this.count,
-            seedSum: this.seedSum,
-            formed: true,
-            previous,
-            value: previous,
-        };
+    /** StockSharp's `Buffer.SumNoFirst`: zero for an empty window, the oldest dropped otherwise. */
+    private seedNoOldest(): number {
+        return this.seed.size === 0 ? 0 : this.seedSum - (this.seed.front() as number);
     }
 }
 
@@ -339,8 +310,7 @@ export class FixedWeightedMovingAverage {
 }
 
 export interface SmoothedMovingAverageCheckpoint {
-    readonly count: number;
-    readonly seedSum: number;
+    readonly seed: RingBufferCheckpoint<number>;
     readonly previous: number;
 }
 
@@ -349,80 +319,70 @@ export interface SmoothedMovingAverageCheckpoint {
  * Wilder recursion. Invalid samples return null without advancing state.
  */
 export class SmoothedMovingAverage {
-    private count = 0;
+    // The seed values themselves, not just their sum: a warm-up preview has to answer with the
+    // oldest one already dropped, which a running total cannot be asked for.
+    private readonly seed: RingBuffer<number>;
     private seedSum = 0;
     private previous = 0;
 
-    constructor(readonly windowLength: number) { length(windowLength); }
-
-    get isFormed(): boolean { return this.count >= this.windowLength; }
-    get value(): number | null { return this.count > 0 ? this.previous : null; }
-
-    push(value: NumericValue): number | null {
-        const result = this.evaluate(value);
-        if (result.value === null) return null;
-        this.count = result.count;
-        this.seedSum = result.seedSum;
-        this.previous = result.previous;
-        return result.value;
+    constructor(readonly windowLength: number) {
+        this.seed = new RingBuffer(length(windowLength));
     }
 
-    preview(value: NumericValue): number | null { return this.evaluate(value).value; }
+    get isFormed(): boolean { return this.seed.full; }
+    get value(): number | null { return this.seed.size > 0 ? this.previous : null; }
+
+    push(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        if (incoming === null) return null;
+        if (!this.seed.full) {
+            this.seed.push(incoming);
+            this.seedSum += incoming;
+            this.previous = this.seedSum / this.windowLength;
+            return this.previous;
+        }
+        this.previous = (
+            this.previous * (this.windowLength - 1) + incoming
+        ) / this.windowLength;
+        return this.previous;
+    }
+
+    preview(value: NumericValue): number | null {
+        const incoming = numeric(value);
+        if (incoming === null) return null;
+        if (!this.seed.full) return (this.seedNoOldest() + incoming) / this.windowLength;
+        return (this.previous * (this.windowLength - 1) + incoming) / this.windowLength;
+    }
 
     reset(): void {
-        this.count = 0;
+        this.seed.clear();
         this.seedSum = 0;
         this.previous = 0;
     }
 
     checkpoint(): SmoothedMovingAverageCheckpoint {
         return Object.freeze({
-            count: this.count,
-            seedSum: this.seedSum,
+            seed: this.seed.checkpoint(),
             previous: this.previous,
         });
     }
 
     restore(checkpoint: SmoothedMovingAverageCheckpoint): void {
         if (checkpoint === null || typeof checkpoint !== 'object'
-            || !Number.isInteger(checkpoint.count)
-            || checkpoint.count < 0 || checkpoint.count > this.windowLength
-            || typeof checkpoint.seedSum !== 'number' || !Number.isFinite(checkpoint.seedSum)
-            || typeof checkpoint.previous !== 'number' || !Number.isFinite(checkpoint.previous)) {
+            || !Array.isArray(checkpoint.seed?.values)
+            || checkpoint.seed.values.length > this.windowLength
+            || checkpoint.seed.values.some((seeded) => numeric(seeded) === null)
+            || numeric(checkpoint.previous) === null) {
             throw new TypeError('sschart: invalid smoothed moving average checkpoint');
         }
-        this.count = checkpoint.count;
-        this.seedSum = checkpoint.seedSum;
+        this.seed.restore(checkpoint.seed);
+        this.seedSum = checkpoint.seed.values.reduce((sum, seeded) => sum + seeded, 0);
         this.previous = checkpoint.previous;
     }
 
-    private evaluate(value: NumericValue): SmoothedMovingAverageCheckpoint & {
-        readonly value: number | null;
-    } {
-        const incoming = numeric(value);
-        if (incoming === null) {
-            return {
-                count: this.count,
-                seedSum: this.seedSum,
-                previous: this.previous,
-                value: null,
-            };
-        }
-        if (this.count < this.windowLength) {
-            const count = this.count + 1;
-            const seedSum = this.seedSum + incoming;
-            const previous = seedSum / this.windowLength;
-            return { count, seedSum, previous, value: previous };
-        }
-        const previous = (
-            this.previous * (this.windowLength - 1) + incoming
-        ) / this.windowLength;
-        return {
-            count: this.count,
-            seedSum: this.seedSum,
-            previous,
-            value: previous,
-        };
+    /** StockSharp's `Buffer.SumNoFirst`: zero for an empty window, the oldest dropped otherwise. */
+    private seedNoOldest(): number {
+        return this.seed.size === 0 ? 0 : this.seedSum - (this.seed.front() as number);
     }
 }
 

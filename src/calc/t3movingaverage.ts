@@ -85,7 +85,7 @@ export class T3MovingAverageProcessor extends SequentialIndicatorProcessor<
         const allValuesFinite = values.every((value) => value !== null);
         const allFormed = allValuesFinite && this.averages.every((average) => (
             average.isFormed
-            || (!commit && average.checkpoint().count + 1 >= average.windowLength)
+            || (!commit && average.checkpoint().seed.values.length + 1 >= average.windowLength)
         ));
         let effectiveWarmUp = this.warmUpPeriod;
         if (allFormed && effectiveWarmUp > 0) {
@@ -129,7 +129,7 @@ export class T3MovingAverageProcessor extends SequentialIndicatorProcessor<
             || !Number.isInteger(state.warmUpPeriod)
             || state.warmUpPeriod < 0 || state.warmUpPeriod > T3_WARM_UP_PERIOD
             || state.averages.some((checkpoint) => (
-                checkpoint?.count !== state.averages[0]?.count
+                checkpoint?.seed?.values?.length !== state.averages[0]?.seed?.values?.length
             ))) {
             throw new TypeError('sschart: invalid T3 Moving Average checkpoint');
         }

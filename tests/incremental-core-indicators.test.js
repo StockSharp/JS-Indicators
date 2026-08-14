@@ -5,10 +5,12 @@ const {
     FractalAdaptiveMovingAverageProcessor,
     IndicatorRuntime,
     JurikMovingAverageIndicator,
+    KeltnerChannelsProcessor,
     McGinleyDynamicProcessor,
     MovingAverageConvergenceDivergenceIndicator,
     OptimalTrackingProcessor,
     SimpleMovingAverageIndicator,
+    VidyaProcessor,
 } = require('../src/index.js');
 
 function flatCandles(closes) {
@@ -164,5 +166,41 @@ describe('core incremental indicator definitions', () => {
         const forming = candle(120, 100, 1);
         assert.equal(previewNext(processor, forming), null);
         assert.ok(Math.abs(commitNext(processor, forming) - 101.04652453258429) <= 1e-9);
+    });
+
+    it('Keltner previews its warm-up middle with the oldest close already dropped', () => {
+        const closes = [100, 104, 99, 107, 103];
+        const processor = new KeltnerChannelsProcessor(6, 2);
+        const candles = flatCandles([...closes, 111]);
+        candles.slice(0, closes.length).forEach((bar, index) => processor.process({
+            index, time: bar.time, value: bar, isFinal: true,
+        }));
+        const preview = processor.process({
+            index: closes.length,
+            time: candles[closes.length].time,
+            value: candles[closes.length],
+            isFinal: false,
+        });
+        const middle = preview.values.find((value) => value.outputId === 'middle').value;
+        // The middle line is the platform's EMA, still seeding: (Buffer.SumNoFirst + close) over
+        // the full period, so the first committed close leaves the sum before the preview enters.
+        const expected = (closes.slice(1).reduce((sum, close) => sum + close, 0) + 111) / 6;
+        assert.ok(Math.abs(middle - expected) <= 1e-12, `${middle} != ${expected}`);
+    });
+
+    it('Vidya does not let a forming bar fill its seed window', () => {
+        const closes = [10, 12, 11, 13, 12, 14, 13, 15, 14, 16, 15, 17];
+        const processor = new VidyaProcessor(4);
+        const values = commit(processor, closes.slice(0, closes.length - 1));
+        const formedAt = values.findIndex((value) => value !== null);
+        assert.ok(formedAt > 0, 'expected Vidya to form inside the committed prefix');
+
+        const fresh = new VidyaProcessor(4);
+        commit(fresh, closes.slice(0, formedAt));
+        const forming = flatCandles(closes)[formedAt];
+        // The bar that would fill the seed window is still forming, and the platform's buffer
+        // only takes committed closes -- so there is nothing to draw for it yet.
+        assert.equal(previewNext(fresh, forming), null);
+        assert.equal(commitNext(fresh, forming), values[formedAt]);
     });
 });

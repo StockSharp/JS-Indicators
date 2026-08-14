@@ -160,8 +160,8 @@ export class RelativeStrengthIndexProcessor extends SequentialIndicatorProcessor
             || (state.previousResult !== null && finite(state.previousResult) === null)
             || !Number.isInteger(state.validDeltas)
             || state.validDeltas < 0 || state.validDeltas > this.length
-            || state.gain?.count !== state.validDeltas
-            || state.loss?.count !== state.validDeltas) {
+            || state.gain?.seed?.values?.length !== state.validDeltas
+            || state.loss?.seed?.values?.length !== state.validDeltas) {
             throw new TypeError('sschart: invalid RSI checkpoint');
         }
         this.gain.restore(state.gain);

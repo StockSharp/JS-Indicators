@@ -3174,7 +3174,7 @@ export interface AdaptiveLengthParameters extends IndicatorParameters {
 
 // Public API module: calc/shared/compound.d.ts
 import { IndicatorSeriesStyle, type IndicatorParameters } from '../../indicator-definition.js';
-import { type RollingWindowCheckpoint } from '../../math/index.js';
+import { type RingBufferCheckpoint, type RollingWindowCheckpoint } from '../../math/index.js';
 export declare function style(series: IndicatorSeriesStyle, color: string, lineWidth?: number): {
     readonly series: IndicatorSeriesStyle;
     readonly color: string;
@@ -3193,16 +3193,13 @@ export interface DonchianChannelsCheckpoint {
     readonly low: RollingWindowCheckpoint;
 }
 export interface FiniteExponentialCheckpoint {
-    readonly count: number;
-    readonly seedSum: number;
-    readonly formed: boolean;
+    readonly seed: RingBufferCheckpoint<number>;
     readonly previous: number;
 }
 export declare class FiniteExponentialAverage {
     readonly length: number;
-    private count;
+    private readonly seed;
     private seedSum;
-    private formed;
     private previous;
     private readonly multiplier;
     constructor(length: number);
@@ -3212,7 +3209,8 @@ export declare class FiniteExponentialAverage {
     reset(): void;
     checkpoint(): FiniteExponentialCheckpoint;
     restore(state: FiniteExponentialCheckpoint): void;
-    private evaluate;
+    /** StockSharp's `Buffer.SumNoFirst`: zero for an empty window, the oldest dropped otherwise. */
+    private seedNoOldest;
 }
 export interface CompoundLengthParameters extends IndicatorParameters {
     readonly length: number;
@@ -4919,17 +4917,14 @@ export declare class PartialSeedSimpleMovingAverage {
     restore(checkpoint: RingBufferCheckpoint<number>): void;
 }
 export interface PartialSeedExponentialMovingAverageCheckpoint {
-    readonly count: number;
-    readonly seedSum: number;
-    readonly formed: boolean;
+    readonly seed: RingBufferCheckpoint<number>;
     readonly previous: number;
 }
 /** StockSharp EMA values, including partial `seedSum / length` warm-up output. */
 export declare class PartialSeedExponentialMovingAverage {
     readonly windowLength: number;
-    private count;
+    private readonly seed;
     private seedSum;
-    private formed;
     private previous;
     private readonly multiplier;
     constructor(windowLength: number);
@@ -4940,7 +4935,8 @@ export declare class PartialSeedExponentialMovingAverage {
     reset(): void;
     checkpoint(): PartialSeedExponentialMovingAverageCheckpoint;
     restore(state: PartialSeedExponentialMovingAverageCheckpoint): void;
-    private evaluate;
+    /** StockSharp's `Buffer.SumNoFirst`: zero for an empty window, the oldest dropped otherwise. */
+    private seedNoOldest;
 }
 /** Linear WMA with weights 1..length from oldest to newest in O(1). */
 export declare class LinearWeightedMovingAverage {
@@ -4975,8 +4971,7 @@ export declare class FixedWeightedMovingAverage {
     restore(checkpoint: RollingWindowCheckpoint): void;
 }
 export interface SmoothedMovingAverageCheckpoint {
-    readonly count: number;
-    readonly seedSum: number;
+    readonly seed: RingBufferCheckpoint<number>;
     readonly previous: number;
 }
 /**
@@ -4985,7 +4980,7 @@ export interface SmoothedMovingAverageCheckpoint {
  */
 export declare class SmoothedMovingAverage {
     readonly windowLength: number;
-    private count;
+    private readonly seed;
     private seedSum;
     private previous;
     constructor(windowLength: number);
@@ -4996,7 +4991,8 @@ export declare class SmoothedMovingAverage {
     reset(): void;
     checkpoint(): SmoothedMovingAverageCheckpoint;
     restore(checkpoint: SmoothedMovingAverageCheckpoint): void;
-    private evaluate;
+    /** StockSharp's `Buffer.SumNoFirst`: zero for an empty window, the oldest dropped otherwise. */
+    private seedNoOldest;
 }
 export interface ExpandingWilderMovingAverageCheckpoint {
     readonly count: number;
