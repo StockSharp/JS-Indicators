@@ -1,6 +1,6 @@
 {
   "name": "@stocksharp/indicators",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "StockSharp JS Indicators — 163 technical-analysis indicators driven bar by bar, a machine-readable catalogue of their parameters, and a suite that checks them against the C# StockSharp platform. No DOM, no dependencies.",
   "license": "SEE LICENSE IN LICENSE",
   "author": {
